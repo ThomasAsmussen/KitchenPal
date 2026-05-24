@@ -9,7 +9,6 @@ from gspread.utils import rowcol_to_a1
 from .config import AppConfig, GOOGLE_SHEETS_SCOPE
 from .constants import (
     DAY_SHEET_DAY_OFFSET,
-    DAY_SHEET_ROOM_COLUMN_OFFSET,
     DAY_SHEET_SIGNUP_HEADER_RANGE,
     ENGLISH_MONTHS,
     PERSONAL_ACCOUNT_BEER_COLUMN,
@@ -25,12 +24,9 @@ from .constants import (
     TRANSACTION_INSERT_END_COLUMN,
     TRANSACTION_INSERT_START_COLUMN,
     TRANSACTION_LOOKUP_RANGE,
+    PLANNING_HEADERS,
+    PLANNING_SHEET_NAME,
 )
-
-
-PLANNING_SHEET_NAME = "Planning"
-PLANNING_HEADERS = ["Year", "Month", "Name", "Room", "Can", "Cannot", "Prefers", "Max 1 day"]
-
 
 @dataclass(frozen=True)
 class PlanningEntry:

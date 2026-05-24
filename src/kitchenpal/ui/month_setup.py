@@ -1,15 +1,11 @@
-import calendar
 from datetime import datetime, timedelta
 
 import streamlit as st
 
-from ..constants import ENGLISH_MONTHS, MONTH_TO_NUMBER
+from ..constants import ENGLISH_MONTHS, MONTH_TO_NUMBER, PLANNING_SHEET_NAME
 from ..runtime_state import bump_cache_version, cache_key
 from ..scheduler import combine_availability, get_weekdays_in_month, parse_dates, schedule_people, split_date_input
 from ..sheets_service import PlanningEntry, SheetsService
-
-
-PLANNING_SHEET_NAME = "Planning"
 
 ENGLISH_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 DATE_CATEGORY_OPTIONS = {
