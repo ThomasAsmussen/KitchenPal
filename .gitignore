@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.codex
+.agents/
+*.pyc
+*.egg-info/
+.env
+.venv/
+koekkenregnskab-3d-ny-040a2ee5b105.json

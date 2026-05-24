@@ -1,0 +1,1 @@
+"""KitchenPal application package."""
