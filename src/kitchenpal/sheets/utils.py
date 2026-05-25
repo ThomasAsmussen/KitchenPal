@@ -118,6 +118,8 @@ def parse_month_sheet_name(worksheet_name: str) -> tuple[int, int] | None:
     parts = str(worksheet_name or "").split()
     if len(parts) < 2:
         return None
+    if len(parts[-1]) != 4 or not parts[-1].isdigit():
+        return None
     try:
         year = int(parts[-1])
         parsed_month_number = month_number(parts[0])
