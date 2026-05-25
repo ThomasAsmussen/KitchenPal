@@ -21,7 +21,10 @@ from .sheets.planning import PlanningSheetsMixin
 
 class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin):
     def __init__(self, config: AppConfig):
-        creds = ServiceAccountCredentials.from_json_keyfile_name(config.credentials_file, GOOGLE_SHEETS_SCOPE)
+        if config.google_credentials_info:
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(config.google_credentials_info, GOOGLE_SHEETS_SCOPE)
+        else:
+            creds = ServiceAccountCredentials.from_json_keyfile_name(config.credentials_file, GOOGLE_SHEETS_SCOPE)
         client = gspread.authorize(creds)
         self._spreadsheet = client.open(config.spreadsheet_name)
         self._template_sheet_name = config.template_sheet_name

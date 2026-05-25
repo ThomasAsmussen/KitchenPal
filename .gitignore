@@ -5,5 +5,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 .env
+.streamlit/secrets.toml
 .venv/
 koekkenregnskab-3d-ny-040a2ee5b105.json
