@@ -3,6 +3,20 @@ from types import SimpleNamespace
 from kitchenpal.ui import month_setup
 
 
+def test_month_sheet_names_keeps_only_english_or_danish_month_year_names():
+    sheet_names = ["Planning", "May 2026", "Maj 2026", "Bugs", "New Features", "May", "2026 May", "May 26"]
+
+    assert month_setup._month_sheet_names(sheet_names) == ["May 2026", "Maj 2026"]
+
+
+def test_month_sheet_for_accepts_english_and_danish_month_names():
+    sheet_names = ["May 2026", "Juni 2026", "Planning"]
+
+    assert month_setup._month_sheet_for(5, 2026, sheet_names) == "May 2026"
+    assert month_setup._month_sheet_for(6, 2026, sheet_names) == "Juni 2026"
+    assert month_setup._month_sheet_for(7, 2026, sheet_names) is None
+
+
 def test_unassigned_people_with_room_numbers_filters_non_room_accounts():
     people = month_setup._unassigned_people_with_room_numbers(
         ["Julia", "Gustav", "Missing"],
