@@ -224,7 +224,7 @@ def render_availability_planner(service: SheetsService):
     limit_days_input = st.text_input(
         "Limit days",
         value=saved_limit_days,
-        placeholder="e.g. 1-10, 27-30, Thursday",
+        placeholder="e.g. 1-20, 23-30",
         key=f"planning_limit_days_{year}_{month_name}_{get_cache_version()}",
     )
     if st.button("Save day limit", key=f"planning_save_limit_days_{year}_{month_name}"):
