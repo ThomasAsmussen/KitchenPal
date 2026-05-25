@@ -569,7 +569,7 @@ def render_calendar_selector(
 
     header_columns = st.columns(7)
     for index, weekday_name in enumerate(ENGLISH_WEEKDAY_NAMES):
-        header_columns[index].markdown(f"**{_weekday_label(weekday_name)}**")
+        header_columns[index].markdown(f"<div class='kpal-weekday'>{_weekday_label(weekday_name)}</div>", unsafe_allow_html=True)
 
     month_calendar = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
     for week in month_calendar:
@@ -580,7 +580,7 @@ def render_calendar_selector(
                     st.write("")
                     continue
 
-                st.markdown(f"<div style='text-align:center; font-size:0.9rem; font-weight:600; line-height:1; margin-bottom:0.2rem;'>{day}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='kpal-day-number'>{day}</div>", unsafe_allow_html=True)
                 checked = st.checkbox(
                     " ",
                     value=day in selected_days,
@@ -602,15 +602,57 @@ def _planning_responsive_style() -> str:
     return """
 <style>
 @media (max-width: 900px) {
-    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stHorizontalBlock"]) {
-        flex-direction: column;
-        gap: 1rem;
+    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) {
+        display: grid !important;
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+        gap: 0.02rem !important;
+        align-items: start;
     }
 
-    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stHorizontalBlock"]) > div[data-testid="column"] {
-        width: 100% !important;
-        flex: 1 1 100% !important;
+    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) > div[data-testid="stColumn"] {
         min-width: 0 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) > div[data-testid="stColumn"] > div {
+        border: 1px solid rgba(49, 51, 63, 0.12);
+        border-radius: 0.16rem;
+        padding: 0.04rem 0.01rem 0.05rem;
+        min-height: 2.15rem;
+        box-sizing: border-box;
+    }
+
+    div[data-testid="stForm"] .kpal-weekday {
+        text-align: center;
+        font-size: 0.48rem;
+        font-weight: 600;
+        line-height: 1;
+        margin: 0;
+    }
+
+    div[data-testid="stForm"] div[data-testid="stCheckbox"] label {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
+    div[data-testid="stForm"] div[data-testid="stCheckbox"] {
+        margin-top: -0.5rem;
+        transform: scale(0.42);
+        transform-origin: top left;
+    }
+
+    div[data-testid="stForm"] .kpal-day-number {
+        text-align: center;
+        font-size: 0.45rem;
+        font-weight: 600;
+        line-height: 1;
+        margin: 0;
+    }
+
+    div[data-testid="stForm"] div[data-testid="stMarkdownContainer"] {
+        margin: 0;
+        padding: 0;
     }
 }
 </style>
