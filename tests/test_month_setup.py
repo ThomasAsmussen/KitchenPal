@@ -138,7 +138,10 @@ def test_planning_responsive_style_targets_small_screens():
     style = month_setup._planning_responsive_style()
 
     assert "@media (max-width: 900px)" in style
-    assert ':has(div[data-testid="stHorizontalBlock"])' in style
+    assert ':has(> div[data-testid="stColumn"]:nth-child(7))' in style
+    assert 'grid-template-columns: repeat(7, minmax(0, 1fr))' in style
+    assert 'transform: scale(0.42)' in style
+    assert 'div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]' in style
 
 
 def test_weekday_label_uses_one_letter():
