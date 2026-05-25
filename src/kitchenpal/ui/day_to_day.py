@@ -5,6 +5,7 @@ import streamlit as st
 from ..a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
 from ..constants import DANISH_TO_ENGLISH_MONTH, ENGLISH_MONTHS, ENGLISH_TO_DANISH_MONTH, PURCHASE_LOOKUP_RANGE
 from ..runtime_state import bump_cache_version, cache_key
+from ..sheets.utils import parse_month_sheet_name
 from ..sheets_service import SheetsService
 from .errors import show_user_error
 
@@ -77,6 +78,10 @@ def _default_sheet_index(sheets_list: list[str]) -> int:
             return sheets_list.index(candidate)
 
     return 0
+
+
+def _month_sheet_names(sheet_names: list[str]) -> list[str]:
+    return [sheet_name for sheet_name in sheet_names if parse_month_sheet_name(sheet_name) is not None]
 
 
 def _format_amount_dkk(amount: float) -> str:
@@ -155,9 +160,9 @@ def render_day_to_day_view(service: SheetsService):
         bump_cache_version()
         st.rerun()
 
-    sheets_list = _get_cached_sheet_names(service)
+    sheets_list = _month_sheet_names(_get_cached_sheet_names(service))
     if not sheets_list:
-        st.warning("No sheets are available yet.")
+        st.warning("No month sheets are available yet.")
         return
 
     selected_sheet_name = st.selectbox("Choose month", sheets_list, index=_default_sheet_index(sheets_list))

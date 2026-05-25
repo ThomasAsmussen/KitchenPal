@@ -4,6 +4,7 @@ from kitchenpal.ui.day_to_day import (
     _delete_confirmation_key,
     _english_month,
     _display_chef,
+    _month_sheet_names,
     _month_entries_cache_key,
     _next_available_row,
     _purchase_date_for_edit,
@@ -64,3 +65,9 @@ def test_month_entries_cache_key_uses_cache_version(monkeypatch):
     monkeypatch.setattr(day_to_day, "cache_key", lambda prefix, *parts: f"{prefix}:v7:{':'.join(parts)}")
 
     assert _month_entries_cache_key("May 2026") == "day_to_day_month_entries:v7:May 2026"
+
+
+def test_month_sheet_names_keeps_only_english_or_danish_month_year_names():
+    sheet_names = ["Planning", "May 2026", "Maj 2026", "Bugs", "May", "2026 May", "May 26"]
+
+    assert _month_sheet_names(sheet_names) == ["May 2026", "Maj 2026"]
