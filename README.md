@@ -11,6 +11,7 @@ pip install -r requirements.txt
 2. Make sure the credentials file exists in the project root, or set:
 
 - `GOOGLE_CREDENTIALS_FILE`
+- `GOOGLE_CREDENTIALS_JSON`
 - `KITCHEN_SPREADSHEET_NAME`
 - `KITCHEN_TEMPLATE_SHEET`
 
@@ -30,6 +31,38 @@ pytest -q
 ```
 
 CI is also configured in `.github/workflows/ci.yml`, which runs tests on pushes and pull requests.
+
+## Deploy
+
+The app can run on Streamlit Community Cloud without committing the Google service-account JSON file.
+
+1. Share the Google Sheet with the service account's `client_email`.
+2. Push the app to GitHub. Do not commit `koekkenregnskab-3d-ny-040a2ee5b105.json` or `.streamlit/secrets.toml`.
+3. In Streamlit Community Cloud, create an app from this repository with `streamlit_app.py` as the entrypoint.
+4. In Advanced settings, paste secrets like:
+
+```toml
+[app]
+spreadsheet_name = "Køkkenregnskab 3D ny"
+template_sheet_name = "Skabelon"
+
+[google_service_account]
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = """-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+"""
+client_email = "..."
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+```
+
+Locally, you can use the same format in `.streamlit/secrets.toml`, or keep using `GOOGLE_CREDENTIALS_FILE`.
 
 ## Structure
 
