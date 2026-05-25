@@ -132,3 +132,15 @@ def test_normalize_planning_days_force_unavailable_uses_all_possible_days():
         "unavailable": [4, 5, 6],
         "preferred": [],
     }
+
+
+def test_planning_responsive_style_targets_small_screens():
+    style = month_setup._planning_responsive_style()
+
+    assert "@media (max-width: 900px)" in style
+    assert ':has(div[data-testid="stHorizontalBlock"])' in style
+
+
+def test_weekday_label_uses_one_letter():
+    assert month_setup._weekday_label("Monday") == "M"
+    assert month_setup._weekday_label("Thursday") == "T"

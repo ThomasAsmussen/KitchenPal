@@ -199,6 +199,7 @@ def render_month_setup_view(service: SheetsService):
 
 def render_availability_planner(service: SheetsService):
     st.header("Planning")
+    st.markdown(_planning_responsive_style(), unsafe_allow_html=True)
 
     current_year = datetime.now().year
     next_month_date = datetime.now().replace(day=1) + timedelta(days=32)
@@ -442,30 +443,26 @@ def render_date_picker(
     else:
         st.session_state.pop(f"{key_prefix}_force_unavailable_signature", None)
 
-    picker_col, preferred_col = st.columns(2)
+    picker_title = DATE_CATEGORY_OPTIONS[selected_category]
+    with st.container(border=True):
+        render_calendar_selector(
+            title=picker_title,
+            year=year,
+            month=month,
+            possible_day_set=possible_day_set,
+            state_key=f"{key_prefix}_{selected_category}",
+            disabled=force_unavailable,
+        )
 
-    with picker_col:
-        picker_title = DATE_CATEGORY_OPTIONS[selected_category]
-        with st.container(border=True):
-            render_calendar_selector(
-                title=picker_title,
-                year=year,
-                month=month,
-                possible_day_set=possible_day_set,
-                state_key=f"{key_prefix}_{selected_category}",
-                disabled=force_unavailable,
-            )
-
-    with preferred_col:
-        with st.container(border=True):
-            render_calendar_selector(
-                "Preferred dates (optional)",
-                year=year,
-                month=month,
-                possible_day_set=possible_day_set,
-                state_key=f"{key_prefix}_preferred",
-                disabled=force_unavailable,
-            )
+    with st.container(border=True):
+        render_calendar_selector(
+            "Preferred dates (optional)",
+            year=year,
+            month=month,
+            possible_day_set=possible_day_set,
+            state_key=f"{key_prefix}_preferred",
+            disabled=force_unavailable,
+        )
 
     return {
         "available": sorted(st.session_state[f"{key_prefix}_available"]),
@@ -572,7 +569,7 @@ def render_calendar_selector(
 
     header_columns = st.columns(7)
     for index, weekday_name in enumerate(ENGLISH_WEEKDAY_NAMES):
-        header_columns[index].markdown(f"**{weekday_name[:3]}**")
+        header_columns[index].markdown(f"**{_weekday_label(weekday_name)}**")
 
     month_calendar = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
     for week in month_calendar:
@@ -583,10 +580,12 @@ def render_calendar_selector(
                     st.write("")
                     continue
 
+                st.markdown(f"<div style='text-align:center; font-size:0.9rem; font-weight:600; line-height:1; margin-bottom:0.2rem;'>{day}</div>", unsafe_allow_html=True)
                 checked = st.checkbox(
-                    str(day),
+                    " ",
                     value=day in selected_days,
                     disabled=disabled or day not in possible_day_set,
+                    label_visibility="collapsed",
                     key=_calendar_widget_key(state_key, day),
                 )
                 if day not in possible_day_set:
@@ -597,6 +596,29 @@ def render_calendar_selector(
                     selected_days.discard(day)
 
     st.session_state[state_key] = sorted(selected_days)
+
+
+def _planning_responsive_style() -> str:
+    return """
+<style>
+@media (max-width: 900px) {
+    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stHorizontalBlock"]) {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(div[data-testid="stHorizontalBlock"]) > div[data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 0 !important;
+    }
+}
+</style>
+"""
+
+
+def _weekday_label(weekday_name: str) -> str:
+    return weekday_name[:1]
 
 
 def format_day_label(year: int, month: int, day: int) -> str:
