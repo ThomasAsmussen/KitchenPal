@@ -1,5 +1,18 @@
 # KitchenPal
 
+## Purpose
+
+KitchenPal is a Streamlit app that provides a friendly interface on top of an
+existing Google Sheet for running a shared kitchen or food club. It keeps the
+spreadsheet as the source of truth while making day-to-day registrations,
+monthly setup, balance transfers, and host planning easier to manage.
+
+The month planner uses Google OR-Tools CP-SAT optimization to turn each person's
+availability, unavailable days, preferred days, and hosting limits into a
+suggested schedule. The optimizer first tries to assign everyone at least once,
+then avoids overusing people, spaces repeated assignments about a week apart,
+and gives a small preference to requested days.
+
 ## Run the app
 
 1. Install dependencies:
