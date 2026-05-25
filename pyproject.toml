@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "openpyxl>=3.1",
     "pytest>=8.0",
 ]
 
