@@ -1,11 +1,13 @@
 import calendar
 from datetime import datetime, timedelta
 
+import gspread
 import streamlit as st
 
-from ..constants import ENGLISH_MONTHS, MONTH_TO_NUMBER, PLANNING_SHEET_NAME
+from ..constants import ENGLISH_MONTHS, MONTH_TO_NUMBER
 from ..runtime_state import bump_cache_version, cache_key, get_cache_version
 from ..scheduler import combine_availability, get_weekdays_in_month, parse_dates, schedule_people, split_date_input
+from ..sheets.utils import parse_month_sheet_name
 from ..sheets_service import PlanningEntry, SheetsService
 from .errors import show_user_error, user_error_message
 
@@ -24,6 +26,17 @@ def _is_planner_room_entry(entry) -> bool:
     return entry.label.isdigit() or (entry.label.startswith("FL") and bool(entry.name))
 
 
+def _month_sheet_names(sheet_names: list[str]) -> list[str]:
+    return [sheet_name for sheet_name in sheet_names if parse_month_sheet_name(sheet_name) is not None]
+
+
+def _month_sheet_for(month: int, year: int, sheet_names: list[str]) -> str | None:
+    for sheet_name in sheet_names:
+        if parse_month_sheet_name(sheet_name) == (month, year):
+            return sheet_name
+    return None
+
+
 def _get_cached_room_entries(service: SheetsService, worksheet_name: str):
     key = cache_key("month_setup_room_entries", worksheet_name)
     if key not in st.session_state:
@@ -35,6 +48,13 @@ def _get_cached_planning_entries(service: SheetsService, month_name: str, year: 
     key = cache_key("month_setup_planning_entries", month_name, year)
     if key not in st.session_state:
         st.session_state[key] = service.get_planning_entries(month_name, year)
+    return st.session_state[key]
+
+
+def _get_cached_possible_days_limit(service: SheetsService, month_name: str, year: int):
+    key = cache_key("month_setup_possible_days_limit", month_name, year)
+    if key not in st.session_state:
+        st.session_state[key] = service.get_possible_days_limit(month_name, year)
     return st.session_state[key]
 
 
@@ -88,7 +108,7 @@ def render_month_setup_view(service: SheetsService):
                     show_user_error(st, exc, "Could not update balances")
 
         st.header("Manage people in month")
-        available_month_sheets = [sheet_name for sheet_name in _get_cached_sheet_names(service) if sheet_name != PLANNING_SHEET_NAME]
+        available_month_sheets = _month_sheet_names(_get_cached_sheet_names(service))
         if not available_month_sheets:
             st.warning("Create a month sheet before managing people.")
             return
@@ -99,7 +119,7 @@ def render_month_setup_view(service: SheetsService):
             st.caption(f"Deletion balance check uses {previous_people_sheet}.")
         try:
             account_entries = service.get_personal_account_entries(people_sheet)
-        except ValueError as exc:
+        except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
             show_user_error(st, exc, "Could not load people")
             account_entries = []
 
@@ -128,7 +148,7 @@ def render_month_setup_view(service: SheetsService):
                     bump_cache_version()
                     st.success(f"Added {new_fl_person.strip()} to {fl_label}.")
                     st.rerun()
-                except ValueError as exc:
+                except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
                     show_user_error(st, exc, "Could not add FL person")
 
         if room_entries:
@@ -150,7 +170,7 @@ def render_month_setup_view(service: SheetsService):
                         bump_cache_version()
                         st.success(f"Updated {room_to_replace.label}; moved the replaced person to {fl_label}.")
                         st.rerun()
-                    except ValueError as exc:
+                    except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
                         show_user_error(st, exc, "Could not replace room person")
 
         if named_fl_entries:
@@ -171,7 +191,7 @@ def render_month_setup_view(service: SheetsService):
                         bump_cache_version()
                         st.success(f"Deleted {fl_person_to_delete.name} from {fl_person_to_delete.label}.")
                         st.rerun()
-                    except ValueError as exc:
+                    except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
                         show_user_error(st, exc, "Could not delete FL person")
         else:
             st.caption("No named FL accounts to delete.")
@@ -188,25 +208,40 @@ def render_availability_planner(service: SheetsService):
     year = st.number_input("Year", min_value=2024, max_value=current_year + 5, value=default_year, step=1)
     month_name = st.selectbox("Month", ENGLISH_MONTHS, index=default_month_index, key="planning_month")
     month = MONTH_TO_NUMBER[month_name]
-    limit_days_input = st.text_input("Limit days", placeholder="e.g. 1-10, 27-30, Thursday")
 
-    available_month_sheets = [sheet_name for sheet_name in _get_cached_sheet_names(service) if sheet_name != PLANNING_SHEET_NAME]
-    default_room_source = f"{month_name} {int(year)}"
-    if default_room_source not in available_month_sheets and available_month_sheets:
-        default_room_source = available_month_sheets[0]
-
+    available_month_sheets = _month_sheet_names(_get_cached_sheet_names(service))
     if not available_month_sheets:
         st.warning("No month sheets are available yet.")
         return
 
-    room_source_sheet = st.selectbox(
-        "Room directory source",
-        available_month_sheets,
-        index=available_month_sheets.index(default_room_source) if default_room_source in available_month_sheets else 0,
-        key=f"planning_room_source_{month_name}_{year}",
-    )
+    room_source_sheet = _month_sheet_for(month, int(year), available_month_sheets)
+    if room_source_sheet is None:
+        st.info(f"Create the {month_name} {int(year)} sheet before planning.")
+        return
 
-    room_entries = [entry for entry in _get_cached_room_entries(service, room_source_sheet) if _is_planner_room_entry(entry)]
+    st.caption(f"Room directory source: {room_source_sheet}")
+    saved_limit_days = _get_cached_possible_days_limit(service, month_name, year)
+    limit_days_input = st.text_input(
+        "Limit days",
+        value=saved_limit_days,
+        placeholder="e.g. 1-10, 27-30, Thursday",
+        key=f"planning_limit_days_{year}_{month_name}_{get_cache_version()}",
+    )
+    if st.button("Save day limit", key=f"planning_save_limit_days_{year}_{month_name}"):
+        try:
+            service.save_possible_days_limit(month_name, year, limit_days_input)
+            bump_cache_version()
+            st.success(f"Saved possible days for {month_name} {int(year)}.")
+            st.rerun()
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not save possible days")
+
+    try:
+        room_entries = [entry for entry in _get_cached_room_entries(service, room_source_sheet) if _is_planner_room_entry(entry)]
+    except gspread.exceptions.WorksheetNotFound as exc:
+        show_user_error(st, exc, "Could not load room directory")
+        st.info("Click Refresh data if the sheet was renamed or deleted directly in Google Sheets.")
+        return
     planning_entries = _get_cached_planning_entries(service, month_name, year)
     stored_entries = {entry.person: entry for entry in planning_entries}
     people_list = [entry.name or entry.label for entry in room_entries]

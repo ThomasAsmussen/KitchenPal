@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import gspread
 
-from ..constants import DAY_SHEET_DAY_OFFSET, PLANNING_HEADER_RANGE, PLANNING_HEADERS, PLANNING_SHEET_NAME
+from ..constants import (
+    DAY_SHEET_DAY_OFFSET,
+    PLANNING_HEADER_RANGE,
+    PLANNING_HEADERS,
+    PLANNING_SHEET_NAME,
+    POSSIBLE_DAYS_HEADER_RANGE,
+    POSSIBLE_DAYS_HEADERS,
+    POSSIBLE_DAYS_SHEET_NAME,
+)
 from .models import PlanningEntry
 
 
@@ -85,6 +93,56 @@ class PlanningSheetsMixin:
             )
 
         return entries
+
+    def get_or_create_possible_days_worksheet(self):
+        try:
+            worksheet = self.get_worksheet(POSSIBLE_DAYS_SHEET_NAME)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = self._spreadsheet.add_worksheet(title=POSSIBLE_DAYS_SHEET_NAME, rows=100, cols=len(POSSIBLE_DAYS_HEADERS))
+            worksheet.update(range_name=POSSIBLE_DAYS_HEADER_RANGE, values=[POSSIBLE_DAYS_HEADERS])
+            return worksheet
+
+        values = worksheet.get_all_values()
+        if not values:
+            worksheet.update(range_name=POSSIBLE_DAYS_HEADER_RANGE, values=[POSSIBLE_DAYS_HEADERS])
+        return worksheet
+
+    def get_possible_days_limit(self, month_name: str, year: int) -> str:
+        worksheet = self.get_or_create_possible_days_worksheet()
+        values = worksheet.get_all_values()[1:]
+
+        for row in values:
+            padded_row = row + [""] * len(POSSIBLE_DAYS_HEADERS)
+            row_year, row_month, limit_days = padded_row[: len(POSSIBLE_DAYS_HEADERS)]
+            if row_year == str(year) and row_month == month_name:
+                return limit_days
+        return ""
+
+    def save_possible_days_limit(self, month_name: str, year: int, limit_days: str):
+        worksheet = self.get_or_create_possible_days_worksheet()
+        existing_values = worksheet.get_all_values()
+        replacement_row = [year, month_name, str(limit_days or "").strip()]
+        final_rows = []
+        replaced = False
+
+        for row in existing_values[1:]:
+            padded_row = row + [""] * len(POSSIBLE_DAYS_HEADERS)
+            row_year, row_month = padded_row[0], padded_row[1]
+            if row_year == str(year) and row_month == month_name:
+                if not replaced:
+                    final_rows.append(replacement_row)
+                    replaced = True
+                continue
+            final_rows.append(padded_row[: len(POSSIBLE_DAYS_HEADERS)])
+
+        if not replaced:
+            final_rows.append(replacement_row)
+
+        worksheet.clear()
+        worksheet.update(range_name=POSSIBLE_DAYS_HEADER_RANGE, values=[POSSIBLE_DAYS_HEADERS])
+        if final_rows:
+            row_count = len(final_rows) + 1
+            worksheet.update(range_name=f"A2:C{row_count}", values=final_rows)
 
     def populate_cooks_for_month(self, worksheet_name: str, assignments: dict[int, str], person_to_room: dict[str, str]):
         worksheet = self.get_worksheet(worksheet_name)

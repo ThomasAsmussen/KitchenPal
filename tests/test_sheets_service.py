@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kitchenpal import constants
 from kitchenpal.sheets_service import PlanningEntry, RoomEntry, SheetsService
 
 
@@ -487,6 +488,69 @@ def test_save_planning_entries_appends_person_when_no_request_exists():
         [
             ["2026", "May", "Thomas", "359", "", "3", "", "TRUE"],
             [2026, "May", "Julia", "357", "5", "", "", "FALSE"],
+        ],
+    )
+
+
+def test_get_possible_days_limit_reads_saved_month_limit():
+    ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
+    ws.set_all_values(
+        [
+            constants.POSSIBLE_DAYS_HEADERS,
+            ["2026", "May", "1-10, Thursday"],
+            ["2026", "June", "2, 4"],
+        ]
+    )
+    service = build_service(FakeSpreadsheet([ws]))
+
+    assert service.get_possible_days_limit("May", 2026) == "1-10, Thursday"
+    assert service.get_possible_days_limit("July", 2026) == ""
+
+
+def test_get_possible_days_limit_initializes_blank_sheet():
+    ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
+    service = build_service(FakeSpreadsheet([ws]))
+
+    assert service.get_possible_days_limit("May", 2026) == ""
+    assert ws.updated_ranges == [(constants.POSSIBLE_DAYS_HEADER_RANGE, [constants.POSSIBLE_DAYS_HEADERS])]
+
+
+def test_save_possible_days_limit_updates_existing_month_without_overwriting_others():
+    ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
+    ws.set_all_values(
+        [
+            constants.POSSIBLE_DAYS_HEADERS,
+            ["2026", "May", "1-10"],
+            ["2026", "June", "2, 4"],
+        ]
+    )
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.save_possible_days_limit("May", 2026, "Thursday")
+
+    assert ws.cleared is True
+    assert ws.updated_ranges[0] == (constants.POSSIBLE_DAYS_HEADER_RANGE, [constants.POSSIBLE_DAYS_HEADERS])
+    assert ws.updated_ranges[1] == (
+        "A2:C3",
+        [
+            [2026, "May", "Thursday"],
+            ["2026", "June", "2, 4"],
+        ],
+    )
+
+
+def test_save_possible_days_limit_appends_new_month():
+    ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
+    ws.set_all_values([constants.POSSIBLE_DAYS_HEADERS, ["2026", "May", "1-10"]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.save_possible_days_limit("June", 2026, "2, 4")
+
+    assert ws.updated_ranges[1] == (
+        "A2:C3",
+        [
+            ["2026", "May", "1-10"],
+            [2026, "June", "2, 4"],
         ],
     )
 
