@@ -629,7 +629,7 @@ def test_copy_balances_from_previous_month_updates_expected_ranges():
 
     assert updates[0]["range"] == "I45:I65"
     assert updates[0]["values"] == [[1234.5], [0.0], [500.0], [0.0]]
-    assert updates[1]["range"] == "AR3:AS3"
+    assert updates[1]["range"] == "AS3:AT3"
     assert updates[1]["values"] == [[5, 2026]]
     assert current.updated_acells["AG37"] == "=2000,00+sum(AG44:AG55)"
 
@@ -666,7 +666,7 @@ def test_copy_balances_from_previous_month_accepts_danish_sheet_names():
     updates = current.batch_updates[0]
     assert updates[0]["range"] == "I45:I65"
     assert updates[0]["values"] == [[1234.5], [0.0]]
-    assert updates[1]["range"] == "AR3:AS3"
+    assert updates[1]["range"] == "AS3:AT3"
     assert updates[1]["values"] == [[6, 2026]]
     assert current.updated_acells["AG37"] == "=2000,00+sum(AG44:AG55)"
 
