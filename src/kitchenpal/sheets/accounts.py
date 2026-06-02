@@ -22,6 +22,11 @@ from .utils import (
 )
 
 
+def _is_person_account_label(label: str) -> bool:
+    normalized = str(label or "").strip().upper()
+    return normalized.isdigit() or (normalized.startswith("FL") and normalized[2:].isdigit())
+
+
 class AccountSheetsMixin:
     def get_room_entries(self, worksheet_name: str) -> List[RoomEntry]:
         worksheet = self.get_worksheet(worksheet_name)
@@ -147,8 +152,6 @@ class AccountSheetsMixin:
         target_entry = entries_by_label.get(str(room_label))
         if target_entry is None or not target_entry.label.isdigit():
             raise ValueError(f"Choose a room-number account to replace, not '{room_label}'.")
-        if not target_entry.name:
-            raise ValueError(f"Room {target_entry.label} has no person to replace.")
 
         entries_by_name = self._account_entries_by_name(worksheet_name)
         existing_new_person = entries_by_name.get(_normalized_person_name(new_person))
@@ -157,12 +160,28 @@ class AccountSheetsMixin:
         if existing_new_person and not existing_new_person.label.upper().startswith("FL"):
             raise ValueError(f"{new_person} already has room {existing_new_person.label}.")
 
+        worksheet = self.get_worksheet(worksheet_name)
+        if existing_new_person and not target_entry.name:
+            self.move_person_between_accounts(worksheet_name, existing_new_person.label, target_entry.label)
+            return existing_new_person.label
+
+        if not target_entry.name:
+            worksheet.batch_update(
+                [
+                    {"range": f"B{target_entry.row_number}", "values": [[new_person]]},
+                    {
+                        "range": rowcol_to_a1(target_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN),
+                        "values": [[0.0]],
+                    },
+                ]
+            )
+            return target_entry.label
+
         fl_entry = existing_new_person or self._first_available_fl_entry(worksheet_name)
         if fl_entry is None:
             raise ValueError("No available FL spots for the replaced person.")
 
         replaced_person = target_entry.name
-        worksheet = self.get_worksheet(worksheet_name)
         target_previous_balance = _parse_amount_value(
             worksheet.cell(target_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN).value
         )
@@ -186,6 +205,65 @@ class AccountSheetsMixin:
             ]
         )
         return fl_entry.label
+
+    def move_person_between_accounts(self, worksheet_name: str, source_label: str, target_label: str):
+        source = str(source_label).strip()
+        target = str(target_label).strip()
+        if not source or not target:
+            raise ValueError("Choose both a source and destination account.")
+        if source == target:
+            raise ValueError("Choose two different accounts.")
+        if not _is_person_account_label(source) or not _is_person_account_label(target):
+            raise ValueError("People can only be moved between room and FL accounts.")
+
+        entries_by_label = self._account_entries_by_label(worksheet_name)
+        source_entry = entries_by_label.get(source)
+        target_entry = entries_by_label.get(target)
+        if source_entry is None:
+            raise ValueError(f"Account '{source}' was not found in {worksheet_name}.")
+        if target_entry is None:
+            raise ValueError(f"Account '{target}' was not found in {worksheet_name}.")
+        if not source_entry.name:
+            raise ValueError(f"Account {source_entry.label} has no person to move.")
+
+        worksheet = self.get_worksheet(worksheet_name)
+        source_previous_balance = _parse_amount_value(
+            worksheet.cell(source_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN).value
+        )
+        target_previous_balance = _parse_amount_value(
+            worksheet.cell(target_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN).value
+        )
+
+        updates = [
+            {"range": f"B{target_entry.row_number}", "values": [[source_entry.name]]},
+            {
+                "range": rowcol_to_a1(target_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN),
+                "values": [[source_previous_balance]],
+            },
+        ]
+        if target_entry.name:
+            updates.extend(
+                [
+                    {"range": f"B{source_entry.row_number}", "values": [[target_entry.name]]},
+                    {
+                        "range": rowcol_to_a1(source_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN),
+                        "values": [[target_previous_balance]],
+                    },
+                ]
+            )
+        else:
+            updates.extend(
+                [
+                    {"range": f"B{source_entry.row_number}", "values": [[""]]},
+                    {
+                        "range": rowcol_to_a1(source_entry.row_number, PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN),
+                        "values": [[0.0]],
+                    },
+                ]
+            )
+
+        worksheet.batch_update(updates)
+        return target_entry.name
 
     def delete_fl_person(self, worksheet_name: str, person_name: str, balance_source_worksheet_name: str | None = None):
         person = str(person_name).strip()

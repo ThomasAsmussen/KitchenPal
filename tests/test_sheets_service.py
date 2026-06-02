@@ -627,10 +627,12 @@ def test_copy_balances_from_previous_month_updates_expected_ranges():
     assert len(current.batch_updates) == 1
     updates = current.batch_updates[0]
 
-    assert updates[0]["range"] == "I45:I65"
-    assert updates[0]["values"] == [[1234.5], [0.0], [500.0], [0.0]]
-    assert updates[1]["range"] == "AS3:AT3"
-    assert updates[1]["values"] == [[5, 2026]]
+    assert updates[0]["range"] == "B45:B48"
+    assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Alberte"], ["Thomas"]]
+    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["values"] == [[1234.5], [0.0], [500.0], [0.0]]
+    assert updates[2]["range"] == "AS3:AT3"
+    assert updates[2]["values"] == [[5, 2026]]
     assert current.updated_acells["AG37"] == "=2000,00+sum(AG44:AG55)"
 
 
@@ -664,14 +666,16 @@ def test_copy_balances_from_previous_month_accepts_danish_sheet_names():
 
     assert len(current.batch_updates) == 1
     updates = current.batch_updates[0]
-    assert updates[0]["range"] == "I45:I65"
-    assert updates[0]["values"] == [[1234.5], [0.0]]
-    assert updates[1]["range"] == "AS3:AT3"
-    assert updates[1]["values"] == [[6, 2026]]
+    assert updates[0]["range"] == "B45:B46"
+    assert updates[0]["values"] == [["Julia"], ["Johannes"]]
+    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["values"] == [[1234.5], [0.0]]
+    assert updates[2]["range"] == "AS3:AT3"
+    assert updates[2]["values"] == [[6, 2026]]
     assert current.updated_acells["AG37"] == "=2000,00+sum(AG44:AG55)"
 
 
-def test_copy_balances_from_previous_month_moves_balances_by_person_name():
+def test_copy_balances_from_previous_month_carries_people_forward_by_account_label():
     previous = FakeWorksheet("May 2026")
     previous.set_batch_get(
         "A45:B65",
@@ -685,22 +689,16 @@ def test_copy_balances_from_previous_month_moves_balances_by_person_name():
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get(
-        "A45:B65",
-        [
-            ["346", "Gustav"],
-            ["347", "Johannes"],
-            ["FL1", "Julia"],
-            ["FL2", "New Person"],
-        ],
-    )
+    current.set_batch_get("A45:B65", [["346", ""], ["347", ""], ["FL1", ""], ["FL2", "Template Person"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
-    assert updates[0]["range"] == "I45:I65"
-    assert updates[0]["values"] == [[300.0], [200.0], [100.0], [0.0]]
+    assert updates[0]["range"] == "B45:B48"
+    assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Gustav"], [""]]
+    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["values"] == [[100.0], [200.0], [300.0], [0.0]]
 
 
 def test_copy_balances_from_previous_month_requires_account_value():
@@ -779,6 +777,63 @@ def test_replace_room_person_moves_existing_fl_person_into_room():
             {"range": "I45", "values": [[300.0]]},
             {"range": "B47", "values": [["Julia"]]},
             {"range": "I47", "values": [[100.0]]},
+        ]
+    ]
+
+
+def test_replace_room_person_allows_empty_room():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", [["346", ""], ["FL1", "Gustav"]])
+    ws.set_batch_get("Z45:Z65", [[0.0], [300.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    label = service.replace_room_person("June 2026", "346", "New Person")
+
+    assert label == "346"
+    assert ws.batch_updates == [
+        [
+            {"range": "B45", "values": [["New Person"]]},
+            {"range": "I45", "values": [[0.0]]},
+        ]
+    ]
+
+
+def test_move_person_between_accounts_moves_to_empty_account():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL1", ""]])
+    ws.set_batch_get("Z45:Z65", [[100.0], [0.0]])
+    ws.set_cell(45, 9, 100.0)
+    ws.set_cell(46, 9, "")
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.move_person_between_accounts("June 2026", "346", "FL1")
+
+    assert ws.batch_updates == [
+        [
+            {"range": "B46", "values": [["Julia"]]},
+            {"range": "I46", "values": [[100.0]]},
+            {"range": "B45", "values": [[""]]},
+            {"range": "I45", "values": [[0.0]]},
+        ]
+    ]
+
+
+def test_move_person_between_accounts_swaps_occupied_accounts():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
+    ws.set_batch_get("Z45:Z65", [[100.0], [200.0]])
+    ws.set_cell(45, 9, 100.0)
+    ws.set_cell(46, 9, 200.0)
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.move_person_between_accounts("June 2026", "346", "347")
+
+    assert ws.batch_updates == [
+        [
+            {"range": "B46", "values": [["Julia"]]},
+            {"range": "I46", "values": [[100.0]]},
+            {"range": "B45", "values": [["Johannes"]]},
+            {"range": "I45", "values": [[200.0]]},
         ]
     ]
 

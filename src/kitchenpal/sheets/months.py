@@ -5,6 +5,7 @@ from ..constants import (
     PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE,
     PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE,
     PERSONAL_ACCOUNT_TABLE_RANGE,
+    PERSONAL_ACCOUNT_TABLE_START_ROW,
     PERSONAL_ACCOUNT_TRANSACTION_TOTAL_RANGE,
 )
 from .utils import (
@@ -57,18 +58,27 @@ class MonthSheetsMixin:
         current_account_rows = current_sheet.batch_get([PERSONAL_ACCOUNT_TABLE_RANGE])[0]
 
         previous_balance_by_name = {}
+        previous_name_by_label = {}
         for index, row in enumerate(previous_account_rows):
             padded_row = row + [""] * 2
-            name_key = _normalized_person_name(padded_row[1])
+            label = str(padded_row[0] or "").strip()
+            name = str(padded_row[1] or "").strip()
+            if label:
+                previous_name_by_label[label] = name
+            name_key = _normalized_person_name(name)
             if not name_key:
                 continue
             balance_row = balance_rows[index] if index < len(balance_rows) else []
             previous_balance_by_name[name_key] = _parse_amount_value(balance_row[0] if balance_row else None)
 
         balances = []
+        names = []
         for row in current_account_rows:
             padded_row = row + [""] * 2
-            current_name_key = _normalized_person_name(padded_row[1])
+            label = str(padded_row[0] or "").strip()
+            name = previous_name_by_label.get(label, "")
+            current_name_key = _normalized_person_name(name)
+            names.append(name)
             balances.append(previous_balance_by_name.get(current_name_key, 0.0))
 
         account_value = _parse_amount_value(
@@ -78,6 +88,10 @@ class MonthSheetsMixin:
         account_formula = f"={account}+sum({PERSONAL_ACCOUNT_TRANSACTION_TOTAL_RANGE})"
 
         updates = [
+            {
+                "range": f"B{PERSONAL_ACCOUNT_TABLE_START_ROW}:B{PERSONAL_ACCOUNT_TABLE_START_ROW + len(names) - 1}",
+                "values": [[name] for name in names],
+            },
             {"range": PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE, "values": [[value] for value in balances]},
             {"range": MONTH_METADATA_RANGE, "values": [[month_number, year]]},
         ]

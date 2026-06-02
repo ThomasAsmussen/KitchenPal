@@ -90,6 +90,7 @@ def render_month_setup_view(service: SheetsService):
                 try:
                     service.create_month_sheet(month, year)
                     bump_cache_version()
+                    st.session_state["manage_people_preferred_month"] = (MONTH_TO_NUMBER[month], year)
                     st.success(f"New sheet created: {month} {year}")
                 except ValueError as exc:
                     show_user_error(st, exc, "Could not create the month sheet")
@@ -103,6 +104,7 @@ def render_month_setup_view(service: SheetsService):
                 try:
                     service.copy_balances_from_previous_month(update_month, update_year)
                     bump_cache_version()
+                    st.session_state["manage_people_preferred_month"] = (MONTH_TO_NUMBER[update_month], update_year)
                     st.success(f"Transferred balances to {update_month} {update_year}.")
                 except ValueError as exc:
                     show_user_error(st, exc, "Could not update balances")
@@ -113,10 +115,23 @@ def render_month_setup_view(service: SheetsService):
             st.warning("Create a month sheet before managing people.")
             return
 
-        people_sheet = st.selectbox("Month sheet", available_month_sheets, key="manage_people_sheet")
-        previous_people_sheet = service.previous_month_sheet_name(people_sheet)
-        if previous_people_sheet:
-            st.caption(f"Deletion balance check uses {previous_people_sheet}.")
+        preferred_month = st.session_state.pop("manage_people_preferred_month", None)
+        preferred_people_sheet = (
+            _month_sheet_for(preferred_month[0], preferred_month[1], available_month_sheets) if preferred_month else None
+        )
+        if preferred_people_sheet:
+            st.session_state["manage_people_sheet"] = preferred_people_sheet
+        people_sheet_index = (
+            available_month_sheets.index(preferred_people_sheet)
+            if preferred_people_sheet in available_month_sheets
+            else 0
+        )
+        people_sheet = st.selectbox(
+            "Month sheet",
+            available_month_sheets,
+            index=people_sheet_index,
+            key="manage_people_sheet",
+        )
         try:
             account_entries = service.get_personal_account_entries(people_sheet)
         except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
@@ -126,6 +141,8 @@ def render_month_setup_view(service: SheetsService):
         room_entries = [entry for entry in account_entries if entry.label.isdigit()]
         fl_entries = [entry for entry in account_entries if entry.label.upper().startswith("FL")]
         named_fl_entries = [entry for entry in fl_entries if entry.name]
+        person_account_entries = [entry for entry in account_entries if entry.label.isdigit() or entry.label.upper().startswith("FL")]
+        named_person_account_entries = [entry for entry in person_account_entries if entry.name]
 
         if account_entries:
             st.table(
@@ -139,6 +156,31 @@ def render_month_setup_view(service: SheetsService):
                     if entry.label.isdigit() or entry.label.upper().startswith("FL")
                 ]
             )
+
+        if named_person_account_entries and person_account_entries:
+            with st.form(key=f"move_person_form_{people_sheet}"):
+                person_to_move = st.selectbox(
+                    "Person to move",
+                    named_person_account_entries,
+                    format_func=lambda entry: f"{entry.label} — {entry.name}",
+                    key=f"person_to_move_{people_sheet}",
+                )
+                destination_account = st.selectbox(
+                    "Move to account",
+                    person_account_entries,
+                    index=1 if len(person_account_entries) > 1 else 0,
+                    format_func=lambda entry: f"{entry.label} — {entry.name or 'Empty'}",
+                    key=f"destination_account_{people_sheet}",
+                )
+                st.caption("If the destination already has a person, the two people swap accounts.")
+                if st.form_submit_button("Move person"):
+                    try:
+                        service.move_person_between_accounts(people_sheet, person_to_move.label, destination_account.label)
+                        bump_cache_version()
+                        st.success(f"Moved {person_to_move.name} to {destination_account.label}.")
+                        st.rerun()
+                    except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
+                        show_user_error(st, exc, "Could not move person")
 
         with st.form(key=f"add_fl_person_form_{people_sheet}"):
             new_fl_person = st.text_input("New FL person", key=f"new_fl_person_{people_sheet}")
@@ -154,24 +196,27 @@ def render_month_setup_view(service: SheetsService):
         if room_entries:
             with st.form(key=f"replace_room_person_form_{people_sheet}"):
                 replacement_person = st.text_input(
-                    "Person moving into room",
-                    help="Use a new name or the exact name of a current FL person.",
+                    "New person moving into room",
+                    help="Use a new name. To move someone already listed, use Move person.",
                     key=f"replacement_person_{people_sheet}",
                 )
                 room_to_replace = st.selectbox(
-                    "Room to take over",
+                    "Room",
                     room_entries,
                     format_func=lambda entry: f"{entry.label} — {entry.name or 'Empty'}",
                     key=f"room_to_replace_{people_sheet}",
                 )
-                if st.form_submit_button("Replace room person"):
+                if st.form_submit_button("Add or replace room person"):
                     try:
                         fl_label = service.replace_room_person(people_sheet, room_to_replace.label, replacement_person)
                         bump_cache_version()
-                        st.success(f"Updated {room_to_replace.label}; moved the replaced person to {fl_label}.")
+                        if room_to_replace.name:
+                            st.success(f"Updated {room_to_replace.label}; moved the replaced person to {fl_label}.")
+                        else:
+                            st.success(f"Added {replacement_person.strip()} to {room_to_replace.label}.")
                         st.rerun()
                     except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
-                        show_user_error(st, exc, "Could not replace room person")
+                        show_user_error(st, exc, "Could not update room person")
 
         if named_fl_entries:
             with st.form(key=f"delete_fl_person_form_{people_sheet}"):
@@ -183,11 +228,7 @@ def render_month_setup_view(service: SheetsService):
                 )
                 if st.form_submit_button("Delete FL person"):
                     try:
-                        service.delete_fl_person(
-                            people_sheet,
-                            fl_person_to_delete.name,
-                            balance_source_worksheet_name=previous_people_sheet,
-                        )
+                        service.delete_fl_person(people_sheet, fl_person_to_delete.name)
                         bump_cache_version()
                         st.success(f"Deleted {fl_person_to_delete.name} from {fl_person_to_delete.label}.")
                         st.rerun()
@@ -394,15 +435,14 @@ def render_availability_planner(service: SheetsService):
         st.warning("Room-number people without a date: " + ", ".join(unassigned_room_people))
 
     missing_rooms = sorted({person for person in schedule.assignments.values() if person not in person_to_room})
-    month_sheet_name = f"{month_name} {year}"
     if st.button("Write schedule to month sheet", key=f"planning_write_{year}_{month_name}"):
         if missing_rooms:
             st.error("Missing room for: " + ", ".join(missing_rooms))
             return
 
-        service.populate_cooks_for_month(month_sheet_name, schedule.assignments, person_to_room)
+        service.populate_cooks_for_month(room_source_sheet, schedule.assignments, person_to_room)
         bump_cache_version()
-        st.success(f"Wrote rooms to {month_sheet_name}.")
+        st.success(f"Wrote rooms to {room_source_sheet}.")
 
 
 def render_date_picker(
