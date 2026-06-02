@@ -130,16 +130,20 @@ The exact cell ranges and table positions are defined in
 
 ## App Views
 
-The sidebar has three main areas:
+The sidebar is organized around the tasks people are trying to complete:
 
-- `Day to day`: signups, dish names, drinks, purchases, and kitchen fund
-  transfers.
-- `Create new month`: month creation, balance carryover, people management, and
-  host planning.
+- `Today`: see today's dinner, host, signups, budget, and save a room signup.
+- `Record drinks & purchases`: add drinks to a room total and register shared
+  kitchen purchases.
+- `Host dinner`: add the dish name, menu details, and final meal cost.
+- `Planning`: collect host availability, generate a host schedule, and write it
+  to the month sheet.
+- `Admin`: create month sheets, copy names and balances, manage people, and
+  register kitchen fund payments.
 - `Feedback`: feature suggestions and bug reports.
 
-Use the sidebar `Refresh data` button if the underlying Google Sheet was edited
-outside the app and the current view looks stale.
+Use the `Refresh data` button in a view if the underlying Google Sheet was
+edited outside the app and the current view looks stale.
 
 ## Tests
 

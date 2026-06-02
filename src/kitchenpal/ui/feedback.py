@@ -1,6 +1,8 @@
+from datetime import datetime
+
 import streamlit as st
 
-from ..runtime_state import bump_cache_version, cache_key
+from ..runtime_state import bump_cache_version, cache_key, get_cache_version
 from ..sheets_service import SheetsService
 from .errors import show_user_error
 
@@ -38,13 +40,20 @@ def _get_cached_feedback_entries(service: SheetsService, feedback_type: str):
     return st.session_state[key]
 
 
-def render_feedback_view(service: SheetsService):
-    st.title("Feedback")
-
-    refresh_clicked = st.sidebar.button("Refresh data", key="feedback_refresh")
-    if refresh_clicked:
+def _render_refresh_button(key: str):
+    loaded_at_key = f"{key}_loaded_at:{get_cache_version()}"
+    if loaded_at_key not in st.session_state:
+        st.session_state[loaded_at_key] = datetime.now().strftime("%H:%M")
+    col1, col2 = st.columns([1, 4])
+    if col1.button("Refresh data", key=key):
         bump_cache_version()
         st.rerun()
+    col2.caption(f"Loaded from Google Sheets at {st.session_state[loaded_at_key]}.")
+
+
+def render_feedback_view(service: SheetsService):
+    st.title("Feedback")
+    _render_refresh_button("feedback_refresh")
 
     feature_tab, bug_tab = st.tabs([FEEDBACK_SECTIONS["feature"]["title"], FEEDBACK_SECTIONS["bug"]["title"]])
 
@@ -62,6 +71,7 @@ def render_feedback_section(service: SheetsService, feedback_type: str):
     done_entries = [entry for entry in entries if entry.status.lower() in ("done", "fixed")]
 
     st.subheader(config["title"])
+    render_feedback_form(service, feedback_type, config)
     render_feedback_entries(
         service=service,
         feedback_type=feedback_type,
@@ -81,12 +91,20 @@ def render_feedback_section(service: SheetsService, feedback_type: str):
         action="delete",
     )
 
+
+def render_feedback_form(service: SheetsService, feedback_type: str, config: dict):
     with st.form(key=config["form_key"]):
-        name = st.text_input("Name", key=f"{feedback_type}_name")
-        title = st.text_input("Title", key=f"{feedback_type}_title")
-        details = st.text_area("Details", key=f"{feedback_type}_details")
+        name = st.text_input("Your name", key=f"{feedback_type}_name")
+        title = st.text_input("Short title", key=f"{feedback_type}_title")
+        details = st.text_area(
+            "What were you trying to do, and what happened?",
+            key=f"{feedback_type}_details",
+        )
 
         if st.form_submit_button("Add"):
+            if not title.strip() or not details.strip():
+                st.error("Add a title and details before submitting.")
+                return
             try:
                 service.add_feedback_entry(feedback_type, name, title, details)
                 bump_cache_version()

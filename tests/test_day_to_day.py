@@ -16,6 +16,7 @@ from kitchenpal.ui.day_to_day import (
     _range_start_row,
     _selected_day_display,
     _transaction_date_for_edit,
+    _valid_days_for_sheet,
 )
 from kitchenpal.ui import day_to_day
 
@@ -84,3 +85,8 @@ def test_month_sheet_names_keeps_only_english_or_danish_month_year_names():
     sheet_names = ["Planning", "May 2026", "Maj 2026", "Bugs", "May", "2026 May", "May 26"]
 
     assert _month_sheet_names(sheet_names) == ["May 2026", "Maj 2026"]
+
+
+def test_valid_days_for_sheet_uses_actual_month_length():
+    assert _valid_days_for_sheet("February 2026") == list(range(1, 29))
+    assert _valid_days_for_sheet("Maj 2026") == list(range(1, 32))
