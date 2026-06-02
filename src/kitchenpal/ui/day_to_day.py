@@ -65,6 +65,17 @@ def _delete_confirmation_key(kind: str, worksheet_name: str) -> str:
     return f"day_to_day_confirm_delete_{kind}:{worksheet_name}"
 
 
+def _meal_details_saved_key(worksheet_name: str, day: int) -> str:
+    return f"day_to_day_meal_details_saved:{worksheet_name}:{day}"
+
+
+def _display_box():
+    try:
+        return st.container(border=True)
+    except TypeError:
+        return st.container()
+
+
 def _default_sheet_index(sheets_list: list[str]) -> int:
     current_month_name = ENGLISH_MONTHS[datetime.now().month - 1]
     current_month_candidates = [f"{current_month_name} {datetime.now().year}"]
@@ -86,6 +97,37 @@ def _month_sheet_names(sheet_names: list[str]) -> list[str]:
 
 def _format_amount_dkk(amount: float) -> str:
     return f"{amount:.2f} DKK"
+
+
+def _format_optional_amount_dkk(amount: float) -> str:
+    return _format_amount_dkk(amount) if amount else "Not set"
+
+
+def _meal_price_for_edit(amount: float) -> str:
+    return f"{amount:.2f}" if amount else ""
+
+
+def _signed_up_count(value: str) -> int:
+    try:
+        return int(float(str(value or "0").replace(",", ".")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _meal_budget(signed_up: str) -> float:
+    return _signed_up_count(signed_up) * 35
+
+
+def _meal_price_per_person(signed_up: str, meal_price: float) -> float:
+    signed_up_count = _signed_up_count(signed_up)
+    if not signed_up_count or not meal_price:
+        return 0.0
+    return meal_price / signed_up_count
+
+
+def _meal_price_per_person_display(signed_up: str, meal_price: float) -> str:
+    price_per_person = _meal_price_per_person(signed_up, meal_price)
+    return _format_optional_amount_dkk(price_per_person)
 
 
 def _table_rows(entries, amount_keys=None, exclude_keys=None):
@@ -181,6 +223,24 @@ def render_day_to_day_view(service: SheetsService):
         room_name = room_name_by_label.get(label, "")
         return f"{label} — {room_name}" if room_name else label
 
+    def render_meal_metrics(day_details, selected_day_display: str):
+        top_col1, top_col2, top_col3 = st.columns(3)
+        top_col1.metric("Date", selected_day_display)
+        top_col2.metric("Signed up", day_details.signed_up)
+        top_col3.metric("Chef", _display_chef(day_details.chef, room_name_by_label))
+
+        bottom_col1, bottom_col2, bottom_col3 = st.columns(3)
+        bottom_col1.metric("Budget", _format_amount_dkk(_meal_budget(day_details.signed_up)))
+        bottom_col2.metric("Price", _format_optional_amount_dkk(day_details.meal_price))
+        bottom_col3.metric("Price per person", _meal_price_per_person_display(day_details.signed_up, day_details.meal_price))
+
+    def render_menu_box(day_details, heading: str):
+        with _display_box():
+            st.markdown(f"**{heading}**")
+            st.write(day_details.menu or "No menu yet")
+            if day_details.menu_description:
+                st.caption(day_details.menu_description)
+
     sign_up_tab, drinks_tab, hold_club_tab, transaction_tab, expenses_tab = st.tabs(
         ["Sign up for food club", "Drinks", "Host food club", "KitchenPal transfers", "Add purchase"]
     )
@@ -188,20 +248,13 @@ def render_day_to_day_view(service: SheetsService):
     with sign_up_tab:
         st.header("Sign up for today's dish")
         selected_day = st.selectbox("Choose day", [i for i in range(1, 32)], index=_default_day_index(), key="signup_day")
-        chef, menu, signed_up_num = service.get_day_summary(selected_sheet_name, selected_day)
+        day_details = service.get_day_details(selected_sheet_name, selected_day)
         month_part_raw = selected_sheet_name.split()[0] if selected_sheet_name else ""
         month_part = _english_month(month_part_raw)
         selected_day_display = _selected_day_display(month_part, selected_day)
 
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        summary_col1.metric("Date", selected_day_display)
-        summary_col2.metric("Signed up", signed_up_num)
-        summary_col3.metric("Budget", f"{int(signed_up_num) * 35} DKK")
-
-        detail_col1, detail_col2, detail_col3 = st.columns(3)
-        detail_col1.metric("Menu", menu or "No menu yet")
-        detail_col2.metric("Chef", _display_chef(chef, room_name_by_label))
-        detail_col3.empty()
+        render_meal_metrics(day_details, selected_day_display)
+        render_menu_box(day_details, "Dish")
 
         with st.form(key="signup_form"):
             account_number = st.selectbox(
@@ -231,27 +284,46 @@ def render_day_to_day_view(service: SheetsService):
     with hold_club_tab:
         st.header("Add today's dish")
         selected_day = st.selectbox("Choose day", [i for i in range(1, 32)], index=_default_day_index(), key="dish_day")
-        chef, menu, signed_up_num = service.get_day_summary(selected_sheet_name, selected_day)
+        if st.session_state.pop(_meal_details_saved_key(selected_sheet_name, selected_day), False):
+            st.success("Meal details have been updated.")
+        day_details = service.get_day_details(selected_sheet_name, selected_day)
         month_part_raw = selected_sheet_name.split()[0] if selected_sheet_name else ""
         month_part = _english_month(month_part_raw)
         selected_day_display = _selected_day_display(month_part, selected_day)
 
-        info_col1, info_col2, info_col3 = st.columns(3)
-        info_col1.metric("Date", selected_day_display)
-        info_col2.metric("Signed up", signed_up_num)
-        info_col3.metric("Chef", _display_chef(chef, room_name_by_label))
+        render_meal_metrics(day_details, selected_day_display)
 
-        st.caption(f"Current menu: {menu or 'No menu yet'}")
+        with st.form(key=f"dish_form_{selected_sheet_name}_{selected_day}"):
+            with _display_box():
+                st.markdown("**Dish and menu description**")
+                dish_name = st.text_input(
+                    "Dish",
+                    value=day_details.menu,
+                    key=f"dish_name_{selected_sheet_name}_{selected_day}",
+                )
+                menu_description = st.text_area(
+                    "Menu description",
+                    value=day_details.menu_description,
+                    key=f"dish_description_{selected_sheet_name}_{selected_day}",
+                )
 
-        with st.form(key="dish_form"):
-            dish_name = st.text_input("Dish", key="dish_name")
-            if st.form_submit_button("Save dish"):
+            with _display_box():
+                st.markdown("**Meal price**")
+                meal_price = st.text_input(
+                    "Price",
+                    value=_meal_price_for_edit(day_details.meal_price),
+                    placeholder="Example: 35.00",
+                    key=f"dish_price_{selected_sheet_name}_{selected_day}",
+                )
+
+            if st.form_submit_button("Save meal details"):
                 try:
-                    service.update_dish_name(selected_sheet_name, selected_day, dish_name)
+                    service.update_meal_details(selected_sheet_name, selected_day, dish_name, meal_price, menu_description)
                     bump_cache_version()
-                    st.success("Today's dish has been updated.")
+                    st.session_state[_meal_details_saved_key(selected_sheet_name, selected_day)] = True
+                    st.rerun()
                 except ValueError as exc:
-                    show_user_error(st, exc, "Could not save dish")
+                    show_user_error(st, exc, "Could not save meal details")
 
     with expenses_tab:
         st.header("Add purchase")

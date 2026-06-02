@@ -164,6 +164,46 @@ def test_get_day_summary_and_signed_up_people_use_batched_reads():
     assert ws.batch_get_calls[-1] == ["I5", "J5", "K5"]
 
 
+def test_get_day_details_reads_price_and_menu_description():
+    ws = FakeWorksheet("October 2024")
+    ws.set_batch_get("C5:G5", [["357", "Lasagna", "", "35,50 kr", "8"]])
+    ws.set_batch_get("AV5", [["Vegetarian option available."]])
+
+    service = build_service(FakeSpreadsheet([ws]))
+    details = service.get_day_details("October 2024", 3)
+
+    assert details.chef == "357"
+    assert details.menu == "Lasagna"
+    assert details.signed_up == "8"
+    assert details.meal_price == 35.5
+    assert details.menu_description == "Vegetarian option available."
+    assert ws.batch_get_calls[-1] == ["C5:G5", "AV5"]
+
+
+def test_update_meal_details_writes_menu_price_and_description():
+    ws = FakeWorksheet("October 2024")
+
+    service = build_service(FakeSpreadsheet([ws]))
+    service.update_meal_details("October 2024", 3, "Lasagna", "35,50", "With salad")
+
+    assert len(ws.batch_updates) == 1
+    updates = ws.batch_updates[0]
+    assert updates[0]["range"] == "D5"
+    assert updates[0]["values"] == [["Lasagna"]]
+    assert updates[1]["range"] == "F5"
+    assert updates[1]["values"] == [[35.5]]
+    assert updates[2]["range"] == "AV5"
+    assert updates[2]["values"] == [["With salad"]]
+
+
+def test_update_meal_details_rejects_invalid_price():
+    ws = FakeWorksheet("October 2024")
+
+    service = build_service(FakeSpreadsheet([ws]))
+    with pytest.raises(ValueError, match="valid meal price"):
+        service.update_meal_details("October 2024", 3, "Lasagna", "free-ish", "")
+
+
 def test_add_transaction_writes_first_empty_row():
     ws = FakeWorksheet("October 2024")
     ws.set_batch_get("AC44:AC55", [["filled"], ["filled"], [], ["filled"]])

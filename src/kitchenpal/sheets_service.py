@@ -7,6 +7,7 @@ from .sheets.day_to_day import DayToDaySheetsMixin
 from .sheets.feedback import FeedbackSheetsMixin
 from .sheets.models import (
     DayToDayEntries,
+    DaySummary,
     DrinkEntry,
     FeedbackEntry,
     PersonalAccountEntry,
@@ -38,6 +39,7 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
 
 __all__ = [
     "DayToDayEntries",
+    "DaySummary",
     "DrinkEntry",
     "FeedbackEntry",
     "PersonalAccountEntry",

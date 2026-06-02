@@ -7,7 +7,9 @@ from gspread.utils import rowcol_to_a1
 from ..a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
 from ..constants import (
     DAY_SHEET_DAY_OFFSET,
+    DAY_SHEET_MEAL_PRICE_COLUMN,
     DAY_SHEET_MENU_COLUMN,
+    DAY_SHEET_MENU_DESCRIPTION_COLUMN,
     DAY_SHEET_SIGNUP_HEADER_RANGE,
     DRINK_TABLE_RANGE,
     PERSONAL_ACCOUNT_BEER_COLUMN,
@@ -27,7 +29,7 @@ from ..constants import (
     TRANSACTION_LOOKUP_RANGE,
     TRANSACTION_TABLE_RANGE,
 )
-from .models import DayToDayEntries, DrinkEntry, PersonalAccountEntry, PurchaseEntry, RoomEntry, TransactionEntry
+from .models import DaySummary, DayToDayEntries, DrinkEntry, PersonalAccountEntry, PurchaseEntry, RoomEntry, TransactionEntry
 from .utils import (
     format_date_value as _format_date_value,
     format_room_label as _format_room_label,
@@ -38,6 +40,37 @@ from .utils import (
     parse_month_sheet_name as _parse_month_sheet_name,
     row_has_content as _row_has_content,
 )
+
+
+def _parse_optional_meal_price(value) -> float:
+    if value in (None, ""):
+        return 0.0
+    if isinstance(value, (int, float)):
+        amount = float(value)
+        if amount < 0:
+            raise ValueError("Meal price cannot be negative.")
+        return amount
+
+    text = str(value).strip().lower()
+    if not text:
+        return 0.0
+
+    text = text.replace("kr", "").replace("dkk", "").replace(" ", "")
+    if "," in text:
+        text = text.replace(".", "").replace(",", ".")
+
+    try:
+        amount = float(text)
+    except ValueError as exc:
+        raise ValueError("Enter a valid meal price.") from exc
+
+    if amount < 0:
+        raise ValueError("Meal price cannot be negative.")
+    return amount
+
+
+def _read_optional_meal_price(value) -> float:
+    return max(0.0, _parse_amount_value(value))
 
 
 class DayToDaySheetsMixin:
@@ -51,6 +84,23 @@ class DayToDaySheetsMixin:
         menu = padded_row[1] or ""
         signed_up = padded_row[4] or "0"
         return chef, menu, signed_up
+
+    def get_day_details(self, worksheet_name: str, day: int) -> DaySummary:
+        worksheet = self.get_worksheet(worksheet_name)
+        row = day + DAY_SHEET_DAY_OFFSET
+        summary_values, description_values = worksheet.batch_get([f"C{row}:G{row}", f"AV{row}"])
+
+        row_values = summary_values[0] if summary_values else []
+        padded_row = row_values + [""] * 5
+        description = description_values[0][0] if description_values and description_values[0] else ""
+
+        return DaySummary(
+            chef=padded_row[0] or "",
+            menu=padded_row[1] or "",
+            signed_up=padded_row[4] or "0",
+            meal_price=_read_optional_meal_price(padded_row[3]),
+            menu_description=str(description or "").strip(),
+        )
 
     def get_signed_up_people(self, worksheet_name: str, day: int, room_entries: List[RoomEntry]) -> List[str]:
         worksheet = self.get_worksheet(worksheet_name)
@@ -89,6 +139,33 @@ class DayToDaySheetsMixin:
     def update_dish_name(self, worksheet_name: str, day: int, dish_name: str):
         worksheet = self.get_worksheet(worksheet_name)
         worksheet.update_cell(day + DAY_SHEET_DAY_OFFSET, DAY_SHEET_MENU_COLUMN, dish_name)
+
+    def update_meal_details(
+        self,
+        worksheet_name: str,
+        day: int,
+        dish_name: str,
+        meal_price,
+        menu_description: str,
+    ):
+        worksheet = self.get_worksheet(worksheet_name)
+        row = day + DAY_SHEET_DAY_OFFSET
+        price_value = "" if meal_price in (None, "") else _parse_optional_meal_price(meal_price)
+        updates = [
+            {
+                "range": rowcol_to_a1(row, DAY_SHEET_MENU_COLUMN),
+                "values": [[str(dish_name or "").strip()]],
+            },
+            {
+                "range": rowcol_to_a1(row, DAY_SHEET_MEAL_PRICE_COLUMN),
+                "values": [[price_value]],
+            },
+            {
+                "range": rowcol_to_a1(row, DAY_SHEET_MENU_DESCRIPTION_COLUMN),
+                "values": [[str(menu_description or "").strip()]],
+            },
+        ]
+        worksheet.batch_update(updates)
 
     def add_purchase(self, worksheet_name: str, room_number: int | str, purchase_date: date, item: str, cost: float):
         worksheet = self.get_worksheet(worksheet_name)

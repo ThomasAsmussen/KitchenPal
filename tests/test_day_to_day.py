@@ -4,6 +4,10 @@ from kitchenpal.ui.day_to_day import (
     _delete_confirmation_key,
     _english_month,
     _display_chef,
+    _format_optional_amount_dkk,
+    _meal_budget,
+    _meal_price_for_edit,
+    _meal_price_per_person_display,
     _month_sheet_names,
     _month_entries_cache_key,
     _next_available_row,
@@ -26,6 +30,15 @@ def test_display_chef_falls_back_to_label_when_name_missing():
 
 def test_display_chef_returns_not_assigned_for_blank_value():
     assert _display_chef("", {}) == "Not assigned"
+
+
+def test_meal_price_helpers_format_missing_and_present_prices():
+    assert _format_optional_amount_dkk(0) == "Not set"
+    assert _format_optional_amount_dkk(35.5) == "35.50 DKK"
+    assert _meal_price_for_edit(0) == ""
+    assert _meal_price_for_edit(35.5) == "35.50"
+    assert _meal_budget("8") == 280
+    assert _meal_price_per_person_display("8", 35.5) == "4.44 DKK"
 
 
 def test_selected_day_display_uses_plain_ordinal_format():

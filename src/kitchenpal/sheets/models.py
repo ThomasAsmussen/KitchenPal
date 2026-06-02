@@ -62,6 +62,15 @@ class DayToDayEntries:
 
 
 @dataclass(frozen=True)
+class DaySummary:
+    chef: str
+    menu: str
+    signed_up: str
+    meal_price: float
+    menu_description: str
+
+
+@dataclass(frozen=True)
 class FeedbackEntry:
     row_number: int
     created_at: str
