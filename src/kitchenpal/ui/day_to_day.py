@@ -1,6 +1,7 @@
 import calendar
 from dataclasses import dataclass
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -243,7 +244,7 @@ def _room_display_factory(room_name_by_label: dict[str, str]):
 def _render_refresh_button(key: str):
     loaded_at_key = f"{key}_loaded_at:{get_cache_version()}"
     if loaded_at_key not in st.session_state:
-        st.session_state[loaded_at_key] = datetime.now().strftime("%H:%M")
+        st.session_state[loaded_at_key] = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%H:%M")
     col1, col2 = st.columns([1, 4])
     if col1.button("Refresh data", key=key):
         bump_cache_version()

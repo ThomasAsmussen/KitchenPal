@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import gspread
 import streamlit as st
@@ -69,7 +70,7 @@ def _get_cached_sheet_names(service: SheetsService):
 def _render_refresh_button(key: str):
     loaded_at_key = f"{key}_loaded_at:{get_cache_version()}"
     if loaded_at_key not in st.session_state:
-        st.session_state[loaded_at_key] = datetime.now().strftime("%H:%M")
+        st.session_state[loaded_at_key] = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%H:%M")
     col1, col2 = st.columns([1, 4])
     if col1.button("Refresh data", key=key):
         bump_cache_version()
