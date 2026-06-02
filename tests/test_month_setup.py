@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from kitchenpal.sheets_service import PlanningEntry
 from kitchenpal.ui import month_setup
 
 
@@ -134,6 +135,36 @@ def test_normalize_planning_days_force_unavailable_uses_all_possible_days():
     }
 
 
+def test_default_cannot_host_false_for_non_room_with_saved_available_day():
+    stored_entry = PlanningEntry(
+        person="Gustav",
+        room_number="FL1",
+        available_dates="7",
+        unavailable_dates="",
+        preferred_dates="",
+        limit_one_day=False,
+    )
+
+    assert month_setup._default_cannot_host_this_month("FL1", stored_entry, [1, 2, 7], 2026, 6) is False
+
+
+def test_default_cannot_host_true_for_non_room_without_saved_choices():
+    assert month_setup._default_cannot_host_this_month("FL1", None, [1, 2, 7], 2026, 6) is True
+
+
+def test_default_date_category_uses_unavailable_when_only_cannot_dates_are_saved():
+    stored_entry = PlanningEntry(
+        person="Philip",
+        room_number="354",
+        available_dates="",
+        unavailable_dates="1, 2, 3, 24",
+        preferred_dates="",
+        limit_one_day=False,
+    )
+
+    assert month_setup._default_date_category(stored_entry, 2026, 6) == "unavailable"
+
+
 def test_planning_responsive_style_targets_small_screens():
     style = month_setup._planning_responsive_style()
 
@@ -147,3 +178,46 @@ def test_planning_responsive_style_targets_small_screens():
 def test_weekday_label_uses_one_letter():
     assert month_setup._weekday_label("Monday") == "M"
     assert month_setup._weekday_label("Thursday") == "T"
+
+
+def test_planning_overview_rows_show_current_choices():
+    rows = month_setup.planning_overview_rows(
+        people_list=["Julia", "Gustav"],
+        person_to_room={"Julia": "346", "Gustav": "FL1"},
+        available={"Julia": ["2", "4"], "Gustav": []},
+        unavailable={"Julia": [], "Gustav": ["1", "2", "3"]},
+        preferences={"Julia": [4], "Gustav": []},
+        limit_one_day_per_person={"Julia": True, "Gustav": False},
+    )
+
+    assert rows == [
+        {
+            "Person": "Julia",
+            "Room": "346",
+            "Can host": "2, 4",
+            "Cannot host": "None",
+            "Preferred": "4",
+            "Host at most once": "Yes",
+        },
+        {
+            "Person": "Gustav",
+            "Room": "FL1",
+            "Can host": "None",
+            "Cannot host": "1, 2, 3",
+            "Preferred": "None",
+            "Host at most once": "No",
+        },
+    ]
+
+
+def test_planning_overview_rows_show_empty_availability_as_all_possible_dates():
+    rows = month_setup.planning_overview_rows(
+        people_list=["Julia"],
+        person_to_room={"Julia": "346"},
+        available={"Julia": []},
+        unavailable={"Julia": []},
+        preferences={"Julia": []},
+        limit_one_day_per_person={"Julia": False},
+    )
+
+    assert rows[0]["Can host"] == "All possible dates"

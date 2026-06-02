@@ -28,6 +28,33 @@ def _is_planner_room_entry(entry) -> bool:
     return entry.label.isdigit() or (entry.label.startswith("FL") and bool(entry.name))
 
 
+def _stored_planning_days(stored_entry: PlanningEntry | None, year: int, month: int) -> dict[str, set[int]]:
+    return {
+        "available": parse_entry_days(stored_entry.available_dates, year, month) if stored_entry else set(),
+        "unavailable": parse_entry_days(stored_entry.unavailable_dates, year, month) if stored_entry else set(),
+        "preferred": parse_entry_days(stored_entry.preferred_dates, year, month) if stored_entry else set(),
+    }
+
+
+def _default_cannot_host_this_month(room_label: str, stored_entry: PlanningEntry | None, possible_days: list[int], year: int, month: int) -> bool:
+    if _is_numeric_room_label(room_label):
+        return False
+
+    stored_days = _stored_planning_days(stored_entry, year, month)
+    if stored_days["available"] or stored_days["preferred"]:
+        return False
+    if stored_days["unavailable"]:
+        return set(possible_days).issubset(stored_days["unavailable"])
+    return True
+
+
+def _default_date_category(stored_entry: PlanningEntry | None, year: int, month: int) -> str:
+    stored_days = _stored_planning_days(stored_entry, year, month)
+    if stored_days["unavailable"] and not stored_days["available"]:
+        return "unavailable"
+    return "available"
+
+
 def _month_sheet_names(sheet_names: list[str]) -> list[str]:
     return [sheet_name for sheet_name in sheet_names if parse_month_sheet_name(sheet_name) is not None]
 
@@ -345,6 +372,7 @@ def render_availability_planner(service: SheetsService):
 
     room_entry_by_name = {entry.name: entry for entry in room_entries if entry.name}
     room_entry_by_label = {entry.label: entry for entry in room_entries}
+    control_version = get_cache_version()
 
     if not people_list:
         st.warning("Add at least one person to create a schedule.")
@@ -357,7 +385,13 @@ def render_availability_planner(service: SheetsService):
             st.warning(f"Skipping {person}: no matching room entry was found.")
             continue
 
-        cannot_host_default = not _is_numeric_room_label(room_entry.label)
+        cannot_host_default = _default_cannot_host_this_month(
+            room_entry.label,
+            stored_entry,
+            possible_days,
+            year,
+            month,
+        )
 
         with st.expander(person):
             st.caption(f"Room: {room_entry.label}{f' — {room_entry.name}' if room_entry.name else ''}")
@@ -365,18 +399,20 @@ def render_availability_planner(service: SheetsService):
             cannot_host_this_month = st.checkbox(
                 "Cannot host food club this month",
                 value=cannot_host_default,
-                key=f"planning_cannot_host_{year}_{month_name}_{person}",
+                key=f"planning_cannot_host_{year}_{month_name}_{person}_{control_version}",
             )
             limit_one_day_per_person[person] = st.checkbox(
                 "Host at most once this month",
                 value=stored_entry.limit_one_day if stored_entry else False,
                 disabled=cannot_host_this_month,
-                key=f"planning_limit_{year}_{month_name}_{person}",
+                key=f"planning_limit_{year}_{month_name}_{person}_{control_version}",
             )
 
-            category_key = f"planning_date_category_{year}_{month_name}_{person}"
+            category_key = f"planning_date_category_{year}_{month_name}_{person}_{control_version}"
             if cannot_host_this_month:
                 st.session_state[category_key] = "unavailable"
+            elif category_key not in st.session_state:
+                st.session_state[category_key] = _default_date_category(stored_entry, year, month)
             date_category = st.radio(
                 "The selected dates mean",
                 list(DATE_CATEGORY_OPTIONS.keys()),
@@ -428,6 +464,18 @@ def render_availability_planner(service: SheetsService):
                 service.save_planning_entries(month_name, year, [entry])
                 bump_cache_version()
                 st.success(f"Saved availability for {person} in {month_name} {year}.")
+
+    overview_rows = planning_overview_rows(
+        people_list=people_list,
+        person_to_room=person_to_room,
+        available=available,
+        unavailable=unavailable,
+        preferences=preferences,
+        limit_one_day_per_person=limit_one_day_per_person,
+    )
+    if overview_rows:
+        st.header("Availability overview")
+        st.dataframe(overview_rows, hide_index=True, use_container_width=True)
 
     schedule_key = f"planning_schedule_{year}_{month_name}"
     schedule_col = st.container()
@@ -758,3 +806,43 @@ def parse_entry_days(value: str, year: int, month: int) -> set[int]:
 
 def format_days(days) -> str:
     return ", ".join(str(day) for day in days)
+
+
+def _overview_days(days, empty_label: str = "None") -> str:
+    normalized_days = [int(day) for day in days if str(day).strip()]
+    if not normalized_days:
+        return empty_label
+    return format_days(sorted(normalized_days))
+
+
+def planning_overview_rows(
+    people_list: list[str],
+    person_to_room: dict[str, str],
+    available: dict[str, list[str]],
+    unavailable: dict[str, list[str]],
+    preferences: dict[str, list[int]],
+    limit_one_day_per_person: dict[str, bool],
+) -> list[dict[str, str]]:
+    rows = []
+    for person in people_list:
+        if person not in person_to_room:
+            continue
+
+        person_available = available.get(person, [])
+        person_unavailable = unavailable.get(person, [])
+        can_host = _overview_days(person_available, "All possible dates" if not person_unavailable else "None")
+        cannot_host = _overview_days(person_unavailable)
+        preferred = _overview_days(preferences.get(person, []))
+
+        rows.append(
+            {
+                "Person": person,
+                "Room": person_to_room[person],
+                "Can host": can_host,
+                "Cannot host": cannot_host,
+                "Preferred": preferred,
+                "Host at most once": "Yes" if limit_one_day_per_person.get(person, False) else "No",
+            }
+        )
+
+    return rows
