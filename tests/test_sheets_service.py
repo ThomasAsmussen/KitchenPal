@@ -52,6 +52,11 @@ class FakeWorksheet:
         self.updated_ranges = []
         self.cleared = False
         self._all_values = []
+        self.appended_rows = []
+
+    def append_rows(self, rows, value_input_option=None):
+        self.appended_rows.append(rows)
+        self._all_values = self._all_values + [list(row) for row in rows]
 
     def set_cell(self, row, col, value):
         self._cells[(row, col)] = value
@@ -675,7 +680,10 @@ def test_copy_balances_from_previous_month_accepts_danish_sheet_names():
     assert current.updated_acells["AG37"] == "=2000,00+sum(AG44:AG55)"
 
 
-def test_copy_balances_from_previous_month_carries_people_forward_by_account_label():
+def test_copy_balances_fills_blank_names_and_keeps_typed_names():
+    # v2 contract: blank current names are filled from the previous occupant of
+    # the label; a non-blank current name is KEPT (never overwritten) and gets
+    # that person's previous balance (0.0 for someone new to the house).
     previous = FakeWorksheet("May 2026")
     previous.set_batch_get(
         "A45:B65",
@@ -692,13 +700,15 @@ def test_copy_balances_from_previous_month_carries_people_forward_by_account_lab
     current.set_batch_get("A45:B65", [["346", ""], ["347", ""], ["FL1", ""], ["FL2", "Template Person"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
-    service.copy_balances_from_previous_month("June", 2026)
+    report = service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
     assert updates[0]["range"] == "B45:B48"
-    assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Gustav"], [""]]
+    assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Gustav"], ["Template Person"]]
     assert updates[1]["range"] == "I45:I65"
     assert updates[1]["values"] == [[100.0], [200.0], [300.0], [0.0]]
+    assert report.chased == []
+    assert report.unplaced == []
 
 
 def test_copy_balances_from_previous_month_requires_account_value():
@@ -945,22 +955,28 @@ def test_copy_balances_writes_exactly_three_ranges_plus_account_formula():
     assert previous.batch_updates == []
 
 
-def test_copy_balances_drops_previous_rooms_missing_from_current():
-    # A room present last month but absent this month is silently skipped:
-    # its balance is NOT carried anywhere and no error is raised.
+def test_copy_balances_reports_unplaced_person_when_no_fl_slot_is_free():
+    # v2 contract: a departed person with a non-zero balance is chased to an FL
+    # slot; when none is free the copy still completes and reports them as
+    # unplaced instead of silently dropping the balance.
     previous, current = _copy_balances_sheets(
         [["346", "Julia"], ["347", "Johannes"]], [[100.0], [200.0]], [["346", "Julia"]]
     )
     service = build_service(FakeSpreadsheet([previous, current]))
 
-    service.copy_balances_from_previous_month("June", 2026)
+    report = service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
     assert updates[0] == {"range": "B45:B45", "values": [["Julia"]]}
     assert updates[1]["values"] == [[100.0]]
+    assert report.unplaced == [("Johannes", 200.0)]
+    assert report.chased == []
 
 
-def test_copy_balances_same_person_in_two_previous_rooms_uses_last_balance_for_both():
+def test_copy_balances_does_not_duplicate_a_person_when_filling_blanks():
+    # v2 contract: the fill step never places the same person twice — the first
+    # blank row (top-down) gets them, later rows whose previous occupant is
+    # already on the sheet stay empty. Duplicate previous rows: last balance wins.
     previous, current = _copy_balances_sheets(
         [["346", "Julia"], ["347", "Julia"]], [[100.0], [200.0]], [["346", ""], ["347", ""]]
     )
@@ -969,8 +985,8 @@ def test_copy_balances_same_person_in_two_previous_rooms_uses_last_balance_for_b
     service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
-    assert updates[0]["values"] == [["Julia"], ["Julia"]]
-    assert updates[1]["values"] == [[200.0], [200.0]]
+    assert updates[0]["values"] == [["Julia"], [""]]
+    assert updates[1]["values"] == [[200.0], [0.0]]
 
 
 def test_copy_balances_matches_balances_by_normalized_name_but_writes_raw_name():
@@ -1021,3 +1037,112 @@ def test_copy_balances_rejects_unknown_month_name():
 
     with pytest.raises(ValueError, match="Unknown month name"):
         service.copy_balances_from_previous_month("Notamonth", 2026)
+
+
+# --- v2 copy-balances contract (approved 2026-08-05): failing until implemented ---
+
+
+def test_copy_balances_chases_departed_balance_into_highest_free_fl():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [[100.0]], [["346", "Kasper"], ["FL4", ""], ["FL5", ""]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Kasper"], [""], ["Julia"]]
+    assert updates[1]["values"] == [[0.0], [0.0], [100.0]]
+    assert report.chased == [("Julia", 100.0, "FL5")]
+    assert report.unplaced == []
+
+
+def test_copy_balances_chase_fills_fl5_then_fl4_in_previous_row_order():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"], ["347", "Johannes"]],
+        [[100.0], [200.0]],
+        [["346", "New1"], ["347", "New2"], ["FL4", ""], ["FL5", ""]],
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["New1"], ["New2"], ["Johannes"], ["Julia"]]
+    assert updates[1]["values"] == [[0.0], [0.0], [200.0], [100.0]]
+    assert report.chased == [("Julia", 100.0, "FL5"), ("Johannes", 200.0, "FL4")]
+
+
+def test_copy_balances_does_not_chase_zero_balance_departures():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [[0.0]], [["346", "Kasper"], ["FL5", ""]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Kasper"], [""]]
+    assert updates[1]["values"] == [[0.0], [0.0]]
+    assert report.chased == []
+    assert report.unplaced == []
+
+
+def test_copy_balances_respects_deliberate_moves_and_does_not_refill_old_room():
+    # Julia was deliberately moved to 347 on the new sheet before the copy ran.
+    # Her old room must NOT be refilled with her, and her balance follows her.
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"], ["347", ""]], [[100.0], [0.0]], [["346", ""], ["347", "Julia"]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [[""], ["Julia"]]
+    assert updates[1]["values"] == [[0.0], [100.0]]
+    assert report.chased == []
+    assert report.unplaced == []
+
+
+def test_copy_balances_flags_suspected_rename_when_departed_occupant_left_a_balance():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [["-75,00 kr"]], [["346", "Juliaa"], ["FL5", ""]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Juliaa"], ["Julia"]]
+    assert updates[1]["values"] == [[0.0], [-75.0]]
+    assert report.suspected_renames == [("346", "Julia", "Juliaa")]
+    assert report.chased == [("Julia", -75.0, "FL5")]
+
+
+def test_copy_balances_flags_duplicate_current_names_and_gives_each_row_the_balance():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [[100.0]], [["346", "Julia"], ["347", "Julia"]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Julia"], ["Julia"]]
+    assert updates[1]["values"] == [[100.0], [100.0]]
+    assert report.duplicate_names == ["Julia"]
+
+
+def test_copy_balances_returns_empty_report_when_nothing_needs_attention():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [[100.0]], [["346", "Julia"]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    assert report.chased == []
+    assert report.unplaced == []
+    assert report.suspected_renames == []
+    assert report.duplicate_names == []
