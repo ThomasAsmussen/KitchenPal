@@ -17,6 +17,17 @@
 
 - This repo is PUBLIC. Never write sheet data, roster data, or credentials anywhere inside the repo directory — dumps go to ~/.cache/kitchenpal/.
 
+# Copy-balances contract (protected)
+
+`copy_balances_from_previous_month(month, year)` in src/kitchenpal/sheets/months.py is the most damage-prone code in the app — wrong numbers propagate for months. Its behaviour is pinned by the copy_balances tests in tests/test_sheets_service.py; do not change it without explicit sign-off.
+
+- Previous month = calendar month before (year-1 for January). Sheet names resolve English then Danish ("May 2026" / "Maj 2026"), exact match then case-insensitive; missing sheets raise ValueError.
+- Reads from the previous sheet: A45:B65 (room label, name), Z45:Z65 (closing balances), AG37 (kitchen account). Reads current A45:B65 for labels only.
+- Writes to the current sheet only: B45:B{n} names, I45:I65 previous-balances, AS3:AT3 = [month#, year], and AG37 = "=<prev value, comma-decimal, no thousands sep>+sum(AG44:AG55)". One batch_update + one update_acell; Z is never written (sheet formulas own it).
+- Matching is by ROOM LABEL: each current row gets the previous month's occupant of that room (overwriting whatever name is in the current sheet) and that person's closing balance. Balances follow rooms, not people.
+- Blanks: unknown/blank labels → name "" and balance 0.0. Unparseable balances → 0.0. Blank AG37 → ValueError. Rooms present last month but missing this month are silently dropped — their balance is carried nowhere.
+- Duplicate person in two rooms last month → the last row's balance wins for both rooms.
+
 # Tests
 
 - `python -m pytest tests/ -q` — AppTest harness, runs headless.

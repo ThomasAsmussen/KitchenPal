@@ -916,3 +916,108 @@ def test_copy_balances_from_previous_month_january_reads_december_of_previous_ye
     assert updates[0]["values"] == [["Julia"], ["Johannes"]]
     assert updates[1]["values"] == [[100.0], [-50.0]]
     assert updates[2]["values"] == [[1, 2027]]
+
+
+# --- Characterization tests: pin the copy-balances contract as it behaves today ---
+
+
+def _copy_balances_sheets(previous_rows, previous_balances, current_rows, previous_name="May 2026", current_name="June 2026"):
+    previous = FakeWorksheet(previous_name)
+    previous.set_batch_get("A45:B65", previous_rows)
+    previous.set_batch_get("Z45:Z65", previous_balances)
+    previous.set_batch_get("AG37", [["2.000,00 kr"]])
+    current = FakeWorksheet(current_name)
+    current.set_batch_get("A45:B65", current_rows)
+    return previous, current
+
+
+def test_copy_balances_writes_exactly_three_ranges_plus_account_formula():
+    previous, current = _copy_balances_sheets([["346", "Julia"]], [[100.0]], [["346", "Julia"]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    assert len(current.batch_updates) == 1
+    updates = current.batch_updates[0]
+    assert len(updates) == 3
+    assert [u["range"] for u in updates] == ["B45:B45", "I45:I65", "AS3:AT3"]
+    assert list(current.updated_acells) == ["AG37"]
+    assert previous.batch_updates == []
+
+
+def test_copy_balances_drops_previous_rooms_missing_from_current():
+    # A room present last month but absent this month is silently skipped:
+    # its balance is NOT carried anywhere and no error is raised.
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"], ["347", "Johannes"]], [[100.0], [200.0]], [["346", "Julia"]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0] == {"range": "B45:B45", "values": [["Julia"]]}
+    assert updates[1]["values"] == [[100.0]]
+
+
+def test_copy_balances_same_person_in_two_previous_rooms_uses_last_balance_for_both():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"], ["347", "Julia"]], [[100.0], [200.0]], [["346", ""], ["347", ""]]
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Julia"], ["Julia"]]
+    assert updates[1]["values"] == [[200.0], [200.0]]
+
+
+def test_copy_balances_matches_balances_by_normalized_name_but_writes_raw_name():
+    previous, current = _copy_balances_sheets([["346", "  Julia  Marie "]], [[150.0]], [["346", ""]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Julia  Marie"]]
+    assert updates[1]["values"] == [[150.0]]
+
+
+def test_copy_balances_resolves_sheet_names_case_insensitively():
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]], [[100.0]], [["346", "Julia"]], previous_name="MAY 2026", current_name="JUNE 2026"
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    assert current.batch_updates, "case-insensitive sheet resolution should find 'JUNE 2026'"
+
+
+def test_copy_balances_formats_negative_account_value_without_thousands_separator():
+    previous, current = _copy_balances_sheets([["346", "Julia"]], [[100.0]], [["346", "Julia"]])
+    previous.set_batch_get("AG37", [["-1.234,56 kr"]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    assert current.updated_acells["AG37"] == "=-1234,56+sum(AG44:AG55)"
+
+
+def test_copy_balances_blank_current_labels_get_blank_name_and_zero_balance():
+    previous, current = _copy_balances_sheets([["346", "Julia"]], [[100.0]], [["346", ""], ["", ""]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Julia"], [""]]
+    assert updates[1]["values"] == [[100.0], [0.0]]
+
+
+def test_copy_balances_rejects_unknown_month_name():
+    service = build_service(FakeSpreadsheet([]))
+
+    with pytest.raises(ValueError, match="Unknown month name"):
+        service.copy_balances_from_previous_month("Notamonth", 2026)
