@@ -80,6 +80,8 @@ def test_purchase_form_accepts_negative_amount_for_deposit_refund():
 
 
 def _month_setup_app():
+    from types import SimpleNamespace
+
     import streamlit as st
 
     from kitchenpal.ui.month_setup import render_month_creation_section
@@ -90,6 +92,12 @@ def _month_setup_app():
 
         def copy_balances_from_previous_month(self, month_name, year):
             st.session_state["stub_copied"] = (month_name, year)
+            return SimpleNamespace(
+                chased=st.session_state.get("stub_chased", []),
+                unplaced=st.session_state.get("stub_unplaced", []),
+                suspected_renames=st.session_state.get("stub_renames", []),
+                duplicate_names=st.session_state.get("stub_duplicates", []),
+            )
 
     render_month_creation_section(StubService())
 
@@ -115,6 +123,25 @@ def test_copy_balances_label_names_source_month_with_year_rollover():
     label = at.checkbox(key="confirm_copy_balances").label
     assert "January 2027" in label
     assert "December 2026" in label
+
+
+def test_copy_balances_ui_surfaces_the_report():
+    at = AppTest.from_function(_month_setup_app)
+    at.session_state["stub_chased"] = [("Alberte", -150.0, "FL5")]
+    at.session_state["stub_unplaced"] = [("Asta", -201.0)]
+    at.session_state["stub_renames"] = [("352", "Asta", "Astaa")]
+    at.run()
+
+    at.selectbox(key="update_month").select("February").run()
+    at.checkbox(key="confirm_copy_balances").check().run()
+    at.button(key="copy_balances_button").click().run()
+
+    assert not at.exception
+    info_text = " ".join(block.value for block in at.info)
+    warning_text = " ".join(block.value for block in at.warning)
+    assert "Alberte" in info_text and "FL5" in info_text
+    assert "Asta" in warning_text and "-201.00" in warning_text
+    assert "Astaa" in warning_text
 
 
 def test_copy_balances_button_runs_copy_after_confirmation():

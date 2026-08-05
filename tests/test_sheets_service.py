@@ -1205,3 +1205,49 @@ def test_copy_balances_never_chases_into_or_blanks_the_spotify_row():
     assert updates[0]["values"] == [["Kasper"], [""]]
     assert updates[1]["values"] == [[0.0], [0.0]]
     assert report.unplaced == [("Julia", 100.0)]
+
+
+def test_delete_fl_person_auto_checks_previous_month_and_refuses_leftover_tab():
+    previous = FakeWorksheet("May 2026")
+    previous.set_batch_get("A45:B65", [["FL1", "Gustav"]])
+    previous.set_batch_get("Z45:Z65", [[-50.0]])
+
+    current = FakeWorksheet("June 2026")
+    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
+    current.set_batch_get("Z45:Z65", [[0.0]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    with pytest.raises(ValueError, match=r"May 2026 balance is -50.00 DKK"):
+        service.delete_fl_person("June 2026", "Gustav")
+
+    assert current.batch_updates == []
+
+
+def test_delete_fl_person_allows_when_both_months_are_zero():
+    previous = FakeWorksheet("May 2026")
+    previous.set_batch_get("A45:B65", [["FL1", "Gustav"]])
+    previous.set_batch_get("Z45:Z65", [[0.0]])
+
+    current = FakeWorksheet("June 2026")
+    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
+    current.set_batch_get("Z45:Z65", [[0.0]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.delete_fl_person("June 2026", "Gustav")
+
+    assert current.batch_updates == [[{"range": "B45", "values": [[""]]}, {"range": "I45", "values": [[0.0]]}]]
+
+
+def test_delete_fl_person_allows_when_person_absent_from_previous_month():
+    previous = FakeWorksheet("May 2026")
+    previous.set_batch_get("A45:B65", [["346", "Julia"]])
+    previous.set_batch_get("Z45:Z65", [[999.0]])
+
+    current = FakeWorksheet("June 2026")
+    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
+    current.set_batch_get("Z45:Z65", [[0.0]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.delete_fl_person("June 2026", "Gustav")
+
+    assert len(current.batch_updates) == 1

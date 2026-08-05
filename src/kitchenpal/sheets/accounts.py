@@ -276,11 +276,20 @@ class AccountSheetsMixin:
         if not entry.label.upper().startswith("FL"):
             raise ValueError(f"{person} can only be deleted from an FL account.")
 
-        balance_entry = entry
-        if balance_source_worksheet_name:
-            balance_entry = self._account_entries_by_name(balance_source_worksheet_name).get(_normalized_person_name(person), entry)
-        if balance_entry.balance != 0:
-            raise ValueError(f"{person} cannot be deleted because their balance is {balance_entry.balance:.2f} DKK.")
+        if entry.balance != 0:
+            raise ValueError(f"{person} cannot be deleted because their balance is {entry.balance:.2f} DKK.")
+
+        # A person may only be deleted when BOTH this month's tab and last
+        # month's are 0 DKK. When no previous sheet exists (first month, or old
+        # sheets cleaned up), only the current balance is checked.
+        previous_sheet_name = balance_source_worksheet_name or self.previous_month_sheet_name(worksheet_name)
+        if previous_sheet_name:
+            previous_entry = self._account_entries_by_name(previous_sheet_name).get(_normalized_person_name(person))
+            if previous_entry and previous_entry.balance != 0:
+                raise ValueError(
+                    f"{person} cannot be deleted because their {previous_sheet_name} balance is "
+                    f"{previous_entry.balance:.2f} DKK."
+                )
 
         worksheet = self.get_worksheet(worksheet_name)
         worksheet.batch_update(

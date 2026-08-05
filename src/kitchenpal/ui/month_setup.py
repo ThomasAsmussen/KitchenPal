@@ -171,10 +171,25 @@ def render_month_creation_section(service: SheetsService):
 
     if submitted:
         try:
-            service.copy_balances_from_previous_month(update_month, update_year)
+            report = service.copy_balances_from_previous_month(update_month, update_year)
             bump_cache_version()
             st.session_state["manage_people_preferred_month"] = (MONTH_TO_NUMBER[update_month], update_year)
             st.success(f"Copied names and balances to {update_month} {update_year}.")
+            for name, balance, fl_label in report.chased:
+                st.info(f"{name} no longer has a room — their {balance:.2f} DKK balance was moved to {fl_label}.")
+            for name, balance in report.unplaced:
+                st.warning(
+                    f"No free FL slot for {name} ({balance:.2f} DKK) — their balance was NOT carried over. "
+                    "Settle and delete an FL person, then run the copy again."
+                )
+            for label, previous_name, current_name in report.suspected_renames:
+                st.warning(
+                    f"Room {label}: '{current_name}' replaced '{previous_name}', who still has money outstanding. "
+                    f"If this is the same person misspelled, fix the name in room {label} and clear the FL row, "
+                    "then run the copy again."
+                )
+            for name in report.duplicate_names:
+                st.warning(f"'{name}' appears in more than one row — check the sheet before trusting the balances.")
         except ValueError as exc:
             show_user_error(st, exc, "Could not copy names and balances")
 
@@ -294,6 +309,11 @@ def render_people_management_section(service: SheetsService):
                     show_user_error(st, exc, "Could not update room person")
 
     if named_fl_entries:
+        previous_sheet_name = service.previous_month_sheet_name(people_sheet)
+        if previous_sheet_name:
+            st.caption(f"Deleting checks that both the {people_sheet} and {previous_sheet_name} balances are 0 DKK.")
+        else:
+            st.caption(f"No previous month sheet found — only the {people_sheet} balance is checked before deleting.")
         with st.form(key=f"delete_fl_person_form_{people_sheet}"):
             fl_person_to_delete = st.selectbox(
                 "Person without a room to delete",
