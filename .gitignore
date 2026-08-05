@@ -8,3 +8,5 @@ __pycache__/
 .streamlit/secrets.toml
 .venv/
 koekkenregnskab-3d-ny-040a2ee5b105.json
+.cache/
+.playwright-mcp/
