@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./run-dev.sh)",
+      "Bash(tail:*)",
+      "Bash(python tools/dump_sheet.py)",
+      "Bash(python -m pytest:*)",
+      "Bash(cat .cache/*)",
+      "Bash(head:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}
