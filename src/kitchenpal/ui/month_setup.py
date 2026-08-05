@@ -696,93 +696,115 @@ def render_calendar_selector(
     state_key: str,
     disabled: bool = False,
 ):
-    st.markdown(f"**{title}**")
     selected_days = set(st.session_state[state_key])
 
-    header_columns = st.columns(7)
-    for index, weekday_name in enumerate(ENGLISH_WEEKDAY_NAMES):
-        header_columns[index].markdown(f"<div class='kpal-weekday'>{_weekday_label(weekday_name)}</div>", unsafe_allow_html=True)
+    # The keyed container emits a stable `st-key-kpalcal_*` class that the
+    # responsive CSS targets, so the styling cannot silently detach when
+    # Streamlit renames its internal test ids.
+    with st.container(key=f"kpalcal_{state_key}"):
+        st.markdown(f"**{title}**")
 
-    month_calendar = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
-    for week in month_calendar:
-        columns = st.columns(7)
-        for index, day in enumerate(week):
-            with columns[index]:
-                if day == 0:
-                    st.write("")
-                    continue
+        header_columns = st.columns(7)
+        for index, weekday_name in enumerate(ENGLISH_WEEKDAY_NAMES):
+            header_columns[index].markdown(f"<div class='kpal-weekday'>{_weekday_label(weekday_name)}</div>", unsafe_allow_html=True)
 
-                st.markdown(f"<div class='kpal-day-number'>{day}</div>", unsafe_allow_html=True)
-                checked = st.checkbox(
-                    " ",
-                    value=day in selected_days,
-                    disabled=disabled or day not in possible_day_set,
-                    label_visibility="collapsed",
-                    key=_calendar_widget_key(state_key, day),
-                )
-                if day not in possible_day_set:
-                    continue
-                if checked:
-                    selected_days.add(day)
-                else:
-                    selected_days.discard(day)
+        month_calendar = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
+        for week in month_calendar:
+            columns = st.columns(7)
+            for index, day in enumerate(week):
+                with columns[index]:
+                    if day == 0:
+                        st.write("")
+                        continue
+
+                    st.markdown(f"<div class='kpal-day-number'>{day}</div>", unsafe_allow_html=True)
+                    checked = st.checkbox(
+                        " ",
+                        value=day in selected_days,
+                        disabled=disabled or day not in possible_day_set,
+                        label_visibility="collapsed",
+                        key=_calendar_widget_key(state_key, day),
+                    )
+                    if day not in possible_day_set:
+                        continue
+                    if checked:
+                        selected_days.add(day)
+                    else:
+                        selected_days.discard(day)
 
     st.session_state[state_key] = sorted(selected_days)
 
 
 def _planning_responsive_style() -> str:
+    # Scoped to the `st-key-kpalcal_*` class emitted by the keyed containers in
+    # render_calendar_selector — our own hook, not a Streamlit internal. Only
+    # the inner stHorizontalBlock/stColumn/stCheckbox test ids are Streamlit's.
+    # Desktop (>900px) is untouched; on phones the flex columns would stack
+    # into one full-width cell per row, so the grid is forced instead and the
+    # checkbox tap area is stretched to the full cell width at thumb size.
     return """
 <style>
 @media (max-width: 900px) {
-    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) {
+    [class*="st-key-kpalcal"] div[data-testid="stHorizontalBlock"] {
         display: grid !important;
         grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
-        gap: 0.02rem !important;
-        align-items: start;
+        gap: 0.15rem !important;
+        align-items: stretch;
     }
 
-    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) > div[data-testid="stColumn"] {
+    [class*="st-key-kpalcal"] div[data-testid="stColumn"] {
         min-width: 0 !important;
-        padding-left: 0 !important;
-        padding-right: 0 !important;
+        width: auto !important;
+        flex: none !important;
     }
 
-    div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) > div[data-testid="stColumn"] > div {
-        border: 1px solid rgba(49, 51, 63, 0.12);
-        border-radius: 0.16rem;
-        padding: 0.04rem 0.01rem 0.05rem;
-        min-height: 2.15rem;
+    [class*="st-key-kpalcal"] div[data-testid="stColumn"] > div {
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        border-radius: 0.25rem;
+        min-height: 3.2rem;
         box-sizing: border-box;
+        gap: 0 !important;
+        padding: 0.1rem 0;
     }
 
-    div[data-testid="stForm"] .kpal-weekday {
+    [class*="st-key-kpalcal"] .kpal-weekday {
         text-align: center;
-        font-size: 0.48rem;
         font-weight: 600;
-        line-height: 1;
+        font-size: 0.7rem;
+        line-height: 1.2;
         margin: 0;
     }
 
-    div[data-testid="stForm"] div[data-testid="stCheckbox"] label {
-        padding-top: 0;
-        padding-bottom: 0;
-    }
-
-    div[data-testid="stForm"] div[data-testid="stCheckbox"] {
-        margin-top: -0.5rem;
-        transform: scale(0.42);
-        transform-origin: top left;
-    }
-
-    div[data-testid="stForm"] .kpal-day-number {
+    [class*="st-key-kpalcal"] .kpal-day-number {
         text-align: center;
-        font-size: 0.45rem;
         font-weight: 600;
-        line-height: 1;
+        font-size: 0.85rem;
+        line-height: 1.3;
         margin: 0;
     }
 
-    div[data-testid="stForm"] div[data-testid="stMarkdownContainer"] {
+    /* The label is the tap target: stretch it across the cell at thumb size. */
+    [class*="st-key-kpalcal"] div[data-testid="stCheckbox"] {
+        margin: 0;
+    }
+
+    [class*="st-key-kpalcal"] div[data-testid="stCheckbox"] label {
+        width: 100%;
+        min-height: 2.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 0;
+    }
+
+    [class*="st-key-kpalcal"] div[data-testid="stCheckbox"] label > span:first-of-type {
+        width: 1.3rem;
+        height: 1.3rem;
+        margin: 0;
+    }
+
+    [class*="st-key-kpalcal"] div[data-testid="stMarkdownContainer"] {
         margin: 0;
         padding: 0;
     }

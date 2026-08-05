@@ -169,10 +169,14 @@ def test_planning_responsive_style_targets_small_screens():
     style = month_setup._planning_responsive_style()
 
     assert "@media (max-width: 900px)" in style
-    assert ':has(> div[data-testid="stColumn"]:nth-child(7))' in style
+    # Scoped to our own keyed-container class, not Streamlit's form internals.
+    assert '[class*="st-key-kpalcal"]' in style
     assert 'grid-template-columns: repeat(7, minmax(0, 1fr))' in style
-    assert 'transform: scale(0.42)' in style
-    assert 'div[data-testid="stForm"] div[data-testid="stHorizontalBlock"]' in style
+    # Tap targets must be thumb-sized, never scaled down.
+    assert "min-height: 2.5rem" in style
+    assert "scale(" not in style
+    assert ":has(" not in style
+    assert 'div[data-testid="stForm"]' not in style
 
 
 def test_weekday_label_uses_one_letter():
