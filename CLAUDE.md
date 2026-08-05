@@ -17,23 +17,11 @@
 
 - This repo is PUBLIC. Never write sheet data, roster data, or credentials anywhere inside the repo directory — dumps go to ~/.cache/kitchenpal/.
 
-# Copy-balances contract (protected)
+# Copy-balances contract (protected, v2 — implemented 2026-08-05)
 
-`copy_balances_from_previous_month(month, year)` in src/kitchenpal/sheets/months.py is the most damage-prone code in the app — wrong numbers propagate for months. Its behaviour is pinned by the copy_balances tests in tests/test_sheets_service.py; do not change it without explicit sign-off.
+`copy_balances_from_previous_month(month, year)` in src/kitchenpal/sheets/months.py is the most damage-prone code in the app — wrong numbers propagate for months. Its behaviour is pinned by the copy_balances tests in tests/test_sheets_service.py; do not change it without explicit sign-off. Balances belong to people; rooms are where a person currently lives.
 
-- Previous month = calendar month before (year-1 for January). Sheet names resolve English then Danish ("May 2026" / "Maj 2026"), exact match then case-insensitive; missing sheets raise ValueError.
-- Reads from the previous sheet: A45:B65 (room label, name), Z45:Z65 (closing balances), AG37 (kitchen account). Reads current A45:B65 for labels only.
-- Writes to the current sheet only: B45:B{n} names, I45:I65 previous-balances, AS3:AT3 = [month#, year], and AG37 = "=<prev value, comma-decimal, no thousands sep>+sum(AG44:AG55)". One batch_update + one update_acell; Z is never written (sheet formulas own it).
-- Matching is by ROOM LABEL: each current row gets the previous month's occupant of that room (overwriting whatever name is in the current sheet) and that person's closing balance. Balances follow rooms, not people.
-- Blanks: unknown/blank labels → name "" and balance 0.0. Unparseable balances → 0.0. Blank AG37 → ValueError. Rooms present last month but missing this month are silently dropped — their balance is carried nowhere.
-- Duplicate person in two rooms last month → the last row's balance wins for both rooms.
-
-# Copy-balances contract v2 (approved 2026-08-05 — tests written, NOT yet implemented)
-
-Person-keyed replacement for the contract above. Balances belong to people; rooms are
-where a person currently lives. Once implemented, the v1 section above is deleted.
-
-UNCHANGED from v1:
+Resolution and mechanics:
 - Previous-month resolution incl. Dec→Jan year rollover; English/Danish sheet names,
   exact then case-insensitive; ValueError when previous or current sheet is missing.
 - Read ranges (previous A45:B65, Z45:Z65, AG37; current A45:B65) and write ranges
@@ -41,7 +29,7 @@ UNCHANGED from v1:
   sep>+sum(AG44:AG55)"). One batch_update + one update_acell. Z never written.
 - Unparseable balances → 0.0. Blank AG37 → ValueError. Blank current labels → "" / 0.0.
 
-CHANGED matching (the core):
+Matching (person-keyed):
 1. KEEP: a current row with a non-blank name keeps that name; its balance is the
    previous sheet's closing balance for that normalized name (0.0 if the person is new).
 2. FILL: a current row with a blank name and a label is filled with the previous
@@ -60,6 +48,16 @@ CHANGED matching (the core):
    duplicate_names [name] when one person appears in several current rows (each row
    gets that person's balance). The copy itself stays deterministic; the report is
    for the UI to surface.
+
+Special rows and creation:
+- Labels in constants.NON_PERSON_ACCOUNT_LABELS (currently "Spotify") are
+  accounting-only, never people: their name and balance carry forward by label
+  (overwriting the current cell), and they are excluded from filling, chasing,
+  rename and duplicate detection. Never chase a balance into such a row.
+- create_month_sheet blanks the person-row name cells (B45:B65, non-person rows
+  kept) right after duplicating the template, so a fresh sheet always arrives in
+  a known state whatever names the template holds. Do not detect template names
+  by comparing against Skabelon — a real resident's name could match.
 
 # Log sheet schema (append-only)
 

@@ -16,11 +16,12 @@ from .sheets.models import (
     RoomEntry,
     TransactionEntry,
 )
+from .sheets.log import LogEntry, LogSheetsMixin
 from .sheets.months import MonthSheetsMixin
 from .sheets.planning import PlanningSheetsMixin
 
 
-class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin):
+class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin, LogSheetsMixin):
     def __init__(self, config: AppConfig):
         if config.google_credentials_info:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(config.google_credentials_info, GOOGLE_SHEETS_SCOPE)
@@ -42,6 +43,7 @@ __all__ = [
     "DaySummary",
     "DrinkEntry",
     "FeedbackEntry",
+    "LogEntry",
     "PersonalAccountEntry",
     "PlanningEntry",
     "PurchaseEntry",

@@ -177,3 +177,24 @@ MONTH_TO_NUMBER = {
     **{month: index + 1 for index, month in enumerate(ENGLISH_MONTHS)},
     **{month: index + 1 for index, month in enumerate(DANISH_MONTHS)},
 }
+
+# Append-only event history worksheet — see "Log sheet schema" in CLAUDE.md.
+LOG_SHEET_NAME = "Log"
+LOG_HEADERS = [
+    "Timestamp",
+    "Event",
+    "Summary",
+    "Action id",
+    "Month sheet",
+    "By",
+    "Person",
+    "From",
+    "To",
+    "Balance",
+    "Room intent",
+]
+
+# Accounting-only rows in the personal account table: never treated as people
+# (no name filling, no balance-by-person, no FL chasing, no rename/duplicate
+# detection). They carry forward by label.
+NON_PERSON_ACCOUNT_LABELS = frozenset({"Spotify"})

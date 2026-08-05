@@ -108,6 +108,13 @@ class FakeSpreadsheet:
 
     def duplicate_sheet(self, sheet_id, new_sheet_name):
         self.duplicate_calls.append((sheet_id, new_sheet_name))
+        template = next((ws for ws in self._worksheets.values() if ws.id == sheet_id), None)
+        clone = FakeWorksheet(new_sheet_name, worksheet_id=sheet_id + 1)
+        if template is not None:
+            clone._batch_get = dict(template._batch_get)
+            clone._cells = dict(template._cells)
+            clone._all_values = [list(row) for row in template._all_values]
+        self._worksheets[new_sheet_name] = clone
 
 
 def build_service(fake_spreadsheet):
@@ -444,14 +451,25 @@ def test_get_drink_entries_skips_header_row():
     assert [entry.wine for entry in entries] == [1]
 
 
-def test_create_month_sheet_duplicates_template_sheet():
+def test_create_month_sheet_duplicates_template_and_blanks_person_names():
+    # A new month sheet must arrive in a known state whatever the template
+    # holds: person names blanked, non-person rows (Spotify) left untouched.
     template = FakeWorksheet("Template", worksheet_id=999)
+    template.set_batch_get(
+        "A45:B65",
+        [["346", "Stale Name"], ["FL1", "Old FL Person"], ["Spotify", "Daniel Vorting"]],
+    )
     other = FakeWorksheet("October 2024")
     spreadsheet = FakeSpreadsheet([template, other])
     service = build_service(spreadsheet)
 
     service.create_month_sheet("November", 2026)
+
     assert spreadsheet.duplicate_calls == [(999, "November 2026")]
+    new_sheet = spreadsheet.worksheet("November 2026")
+    assert new_sheet.batch_updates == [
+        [{"range": "B45:B47", "values": [[""], [""], ["Daniel Vorting"]]}]
+    ]
 
 
 def test_create_month_sheet_raises_if_exists():
@@ -1146,3 +1164,44 @@ def test_copy_balances_returns_empty_report_when_nothing_needs_attention():
     assert report.unplaced == []
     assert report.suspected_renames == []
     assert report.duplicate_names == []
+
+
+def test_copy_balances_carries_spotify_by_label_outside_person_logic():
+    # Spotify is accounting-only: its name and balance carry forward by label
+    # exactly as v1 did — overwritten from the previous sheet's Spotify row —
+    # and it never participates in chasing, rename or duplicate detection.
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"], ["Spotify", "Daniel Vorting"]],
+        [[100.0], [50.0]],
+        [["346", "Kasper"], ["FL5", ""], ["Spotify", "Edited By Hand"]],
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Kasper"], ["Julia"], ["Daniel Vorting"]]
+    assert updates[1]["values"] == [[0.0], [100.0], [50.0]]
+    # Daniel Vorting is not chased, not a rename suspect, not a duplicate.
+    assert report.chased == [("Julia", 100.0, "FL5")]
+    assert report.unplaced == []
+    assert report.suspected_renames == [("346", "Julia", "Kasper")]
+    assert report.duplicate_names == []
+
+
+def test_copy_balances_never_chases_into_or_blanks_the_spotify_row():
+    # Even with no free FL slot, a departed balance must not land on Spotify,
+    # and a Spotify row with no previous counterpart is left blank, not chased.
+    previous, current = _copy_balances_sheets(
+        [["346", "Julia"]],
+        [[100.0]],
+        [["346", "Kasper"], ["Spotify", "Daniel Vorting"]],
+    )
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    report = service.copy_balances_from_previous_month("June", 2026)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Kasper"], [""]]
+    assert updates[1]["values"] == [[0.0], [0.0]]
+    assert report.unplaced == [("Julia", 100.0)]
