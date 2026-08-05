@@ -94,7 +94,7 @@ def render_feedback_section(service: SheetsService, feedback_type: str):
 
 
 def render_feedback_form(service: SheetsService, feedback_type: str, config: dict):
-    with st.form(key=config["form_key"]):
+    with st.form(key=config["form_key"], clear_on_submit=True):
         name = st.text_input("Your name", key=f"{feedback_type}_name")
         title = st.text_input("Short title", key=f"{feedback_type}_title")
         details = st.text_area(
