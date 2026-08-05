@@ -7,11 +7,15 @@
 
 # Data
 
-- Backend is a Google Sheet. Local snapshot lives in .cache/*.csv.
+- Backend is a Google Sheet. Local snapshot lives in ~/.cache/kitchenpal/*.csv.
 - Refresh it with `python tools/dump_sheet.py` (read-only, cannot write).
-- .cache/ is a snapshot, not live. Types differ from the API: gspread returns strings, CSV parsing may infer. Don't chase type bugs against the CSVs.
+- ~/.cache/kitchenpal/ is a snapshot, not live. Types differ from the API: gspread returns strings, CSV parsing may infer. Don't chase type bugs against the CSVs.
 - The app points at "KitchenPal DEV", a disposable copy. Writing to it through the app is expected and encouraged — that's what it's for. Verify write paths end to end rather than stopping at the UI layer. Never point secrets.toml back at the production sheet.
-- The roster (Kopi af In-House Liste) is masked in .cache/ only. Real values ARE available at runtime via SheetsService — build features that use them normally.
+- The roster (Kopi af In-House Liste) is masked in the dump only. Real values ARE available at runtime via SheetsService — build features that use them normally.
+
+# Constraints
+
+- This repo is PUBLIC. Never write sheet data, roster data, or credentials anywhere inside the repo directory — dumps go to ~/.cache/kitchenpal/.
 
 # Tests
 
