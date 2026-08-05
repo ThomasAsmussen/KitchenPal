@@ -473,15 +473,17 @@ def _render_purchases_section(service: SheetsService, context: DayToDayContext):
         purchase_room = st.selectbox("Room paid", context.room_labels, format_func=room_display, key="purchase_room")
         purchase_item = st.text_input("What was bought?", key="purchase_item")
         purchase_date = st.date_input("Date", key="purchase_date")
-        purchase_cost = st.number_input("Total price", min_value=0.0, step=0.01, key="purchase_cost")
+        purchase_cost = st.number_input(
+            "Total price (negative for refunds like pant)", step=0.01, key="purchase_cost"
+        )
         submitted = st.form_submit_button("Register purchase")
 
     if submitted:
         if not purchase_item.strip():
             st.error("Add what was bought before saving.")
             return
-        if purchase_cost <= 0:
-            st.error("Add a price greater than 0 before saving.")
+        if purchase_cost == 0:
+            st.error("Add a non-zero price before saving (negative for refunds).")
             return
         try:
             target_row = _next_available_row(
@@ -552,10 +554,9 @@ def _render_purchases_section(service: SheetsService, context: DayToDayContext):
             key=f"edit_purchase_date_{selected_purchase.row_number}",
         )
         edited_purchase_cost = st.number_input(
-            "Total price",
-            min_value=0.0,
+            "Total price (negative for refunds like pant)",
             step=0.01,
-            value=max(0.0, float(selected_purchase.amount)),
+            value=float(selected_purchase.amount),
             key=f"edit_purchase_cost_{selected_purchase.row_number}",
         )
         save_purchase = st.form_submit_button("Save purchase")
@@ -565,8 +566,8 @@ def _render_purchases_section(service: SheetsService, context: DayToDayContext):
         if not edited_purchase_item.strip():
             st.error("Add what was bought before saving.")
             return
-        if edited_purchase_cost <= 0:
-            st.error("Add a price greater than 0 before saving.")
+        if edited_purchase_cost == 0:
+            st.error("Add a non-zero price before saving (negative for refunds).")
             return
         try:
             st.session_state.pop(_delete_confirmation_key("purchase", context.selected_sheet_name), None)
