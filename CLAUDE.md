@@ -1,3 +1,23 @@
+# Where we are (updated 2026-08-05, end of session)
+
+Landed today (main == claude-worklog, suite at 146 passed):
+- Bug fixes: feedback form clears after submit (3c14956), negative purchase amounts for pant (9211df8), planning calendar usable on phones (5ce1d9e), copy-balances button deadlock + frozen label (4c7f3ca).
+- Repo/infra: roster PII scrubbed from git history and force-pushed, sheet dumps moved to ~/.cache/kitchenpal/ (d3ad030), streamlit pinned (80e372c).
+- Copy-balances v2 + Log: contract and failing tests (357c28b), person-keyed copy + Log service (3501efb), two-month delete guard + copy report in Admin (3a, 0efb1fb), occupancy actions + Log writes + sheet integrity check (3b, d3d1593).
+
+Next, in order:
+1. USER_ENTERED formula-write audit: gspread batch_update defaults to RAW (bit us when backfilling Z formulas); audit every code path that writes formulas, and check whether any existing DEV sheet has a text (non-formula) AG37.
+2. The four remaining integrity checks: signup header complete at I2:AA2, account table anchored (A45 == "346"), AG37 contains a formula, AS3:AT3 month metadata present.
+3. 3c: People tab restructure (task-language forms, compact two-line people list) and the pending-handover banner (reminder options 1+2).
+
+Open backlog: bytte madklub, the Andet capacity question, birthdays overview, tutorial page.
+
+DEV sheet state: February 2027 deleted; January 2027 restored to its post-copy state; test1 removed from FL2; the Log worksheet permanently contains demo rows from the 2026-08-05 end-to-end tests — real history from here on, but the early rows are test events.
+
+Manual tasks for Thomas (the app can't do these):
+- Backfill the closing-balance formulas (=sum(F{row}:X{row}) in Z45:Z65) into the PRODUCTION month sheets — the Skabelon fix only helps sheets created from now on.
+- Mark today's fixed items Done in the production Bugs and New Features tabs.
+
 # Dev loop
 
 - Start app: `./run-dev.sh` (port 8501, logs to /tmp/streamlit.log)
@@ -50,6 +70,9 @@ Matching (person-keyed):
    for the UI to surface.
 
 Special rows and creation:
+- The −29 in AG44:AG55 on a fresh sheet is the legitimate automatic monthly
+  Spotify transaction, present in the template on purpose. It is NOT stale
+  data — do not flag it, "fix" it, or add an integrity check against it.
 - Labels in constants.NON_PERSON_ACCOUNT_LABELS (currently "Spotify") are
   accounting-only, never people: their name and balance carry forward by label
   (overwriting the current cell), and they are excluded from filling, chasing,
