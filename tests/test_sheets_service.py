@@ -64,6 +64,10 @@ class FakeWorksheet:
     def set_batch_get(self, range_name, value):
         self._batch_get[range_name] = value
 
+    def set_batch_get_formulas(self, range_name, value):
+        self._batch_get_formulas = getattr(self, "_batch_get_formulas", {})
+        self._batch_get_formulas[range_name] = value
+
     def set_all_values(self, value):
         self._all_values = value
 
@@ -74,8 +78,11 @@ class FakeWorksheet:
         self.updated_cells.append((row, col, value))
         self._cells[(row, col)] = value
 
-    def batch_get(self, ranges):
+    def batch_get(self, ranges, value_render_option=None):
         self.batch_get_calls.append(list(ranges))
+        if value_render_option == "FORMULA":
+            formulas = getattr(self, "_batch_get_formulas", {})
+            return [formulas[r] for r in ranges]
         return [self._batch_get[r] for r in ranges]
 
     def batch_update(self, updates):
@@ -753,6 +760,7 @@ def test_add_person_as_fl_uses_first_available_fl_spot():
         [["346", "Julia"], ["FL1", "Gustav"], ["FL2", ""], ["FL3", ""]],
     )
     ws.set_batch_get("Z45:Z65", [[100.0], [0.0], [0.0], [0.0]])
+    ws.set_batch_get("I2:AA2", [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]])
     service = build_service(FakeSpreadsheet([ws]))
 
     fl_label = service.add_person_as_fl("June 2026", "New Person")
@@ -1251,3 +1259,214 @@ def test_delete_fl_person_allows_when_person_absent_from_previous_month():
     service.delete_fl_person("June 2026", "Gustav")
 
     assert len(current.batch_updates) == 1
+
+
+# --- Sheet integrity check (3b prep): failing until implemented ---
+
+
+def test_check_month_sheet_integrity_flags_account_rows_without_closing_formula():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL4", ""], ["Spotify", "Daniel"]])
+    ws.set_batch_get_formulas("Z45:Z65", [["=sum(F45:X45)"], [""], ["=sum(F47:X47)"]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert problems == [
+        "June 2026: account row FL4 has no closing-balance formula in Z46 — "
+        "balances on this row read as 0 and vanish at the next rollover."
+    ]
+
+
+def test_check_month_sheet_integrity_passes_clean_sheet_and_skips_blank_labels():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", [["346", "Julia"], ["", ""], ["FL5", ""]])
+    ws.set_batch_get_formulas("Z45:Z65", [["=sum(F45:X45)"], [""], ["=sum(F47:X47)"]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    assert service.check_month_sheet_integrity("June 2026") == []
+
+
+# --- 3b: occupancy actions and Log writes: failing until implemented ---
+
+SIGNUP_HEADER = [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]]
+
+
+def _occupancy_sheet(rows, balances, cells=(), with_log=True):
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("A45:B65", rows)
+    ws.set_batch_get("Z45:Z65", balances)
+    ws.set_batch_get("I2:AA2", SIGNUP_HEADER)
+    for row, col, value in cells:
+        ws.set_cell(row, col, value)
+    sheets = [ws]
+    log_ws = None
+    if with_log:
+        log_ws = FakeWorksheet("Log")
+        log_ws.set_all_values([list(constants.LOG_HEADERS)])
+        sheets.append(log_ws)
+    return ws, log_ws, build_service(FakeSpreadsheet(sheets))
+
+
+def _logged_rows(log_ws):
+    return [row for batch in log_ws.appended_rows for row in batch]
+
+
+def test_add_person_as_fl_parks_arrival_in_lowest_signup_capable_slot_and_logs():
+    ws, log_ws, service = _occupancy_sheet(
+        [["FL1", "Gustav"], ["FL2", ""], ["FL3", ""], ["FL4", ""], ["FL5", ""]],
+        [[0.0], [0.0], [0.0], [0.0], [0.0]],
+    )
+
+    fl_label = service.add_person_as_fl("June 2026", "Kasper", intended_room="348")
+
+    assert fl_label == "FL2"
+    assert ws.batch_updates == [[{"range": "B46", "values": [["Kasper"]]}, {"range": "I46", "values": [[0.0]]}]]
+    rows = _logged_rows(log_ws)
+    assert len(rows) == 1
+    assert rows[0][1] == "parked_fl"
+    assert rows[0][3] != ""  # action id
+    assert rows[0][4] == "June 2026"
+    assert rows[0][6] == "Kasper"
+    assert rows[0][8] == "FL2"
+    assert rows[0][10] == "348"
+
+
+def test_add_person_as_fl_distinguishes_missing_signup_capable_slot():
+    ws, log_ws, service = _occupancy_sheet(
+        [["FL1", "Gustav"], ["FL2", "Astrid"], ["FL3", "Esther"], ["FL4", ""], ["FL5", ""]],
+        [[0.0], [0.0], [0.0], [0.0], [0.0]],
+    )
+
+    with pytest.raises(ValueError, match="signup-capable"):
+        service.add_person_as_fl("June 2026", "Kasper")
+
+    assert ws.batch_updates == []
+
+
+def test_add_person_as_fl_reports_when_no_slot_free_at_all():
+    ws, log_ws, service = _occupancy_sheet(
+        [["FL1", "A"], ["FL2", "B"], ["FL3", "C"], ["FL4", "D"], ["FL5", "E"]],
+        [[0.0]] * 5,
+    )
+
+    with pytest.raises(ValueError, match="No FL slot is free at all"):
+        service.add_person_as_fl("June 2026", "Kasper")
+
+
+def test_move_person_out_parks_debtor_in_highest_free_fl_and_logs():
+    ws, log_ws, service = _occupancy_sheet(
+        [["346", "Julia"], ["FL4", ""], ["FL5", ""]],
+        [[-150.0], [0.0], [0.0]],
+        cells=[(45, 9, "-75,00 kr")],
+    )
+
+    fl_label = service.move_person_out("June 2026", "346")
+
+    assert fl_label == "FL5"
+    assert ws.batch_updates == [
+        [
+            {"range": "B45", "values": [[""]]},
+            {"range": "I45", "values": [[0.0]]},
+            {"range": "B47", "values": [["Julia"]]},
+            {"range": "I47", "values": [[-75.0]]},
+        ]
+    ]
+    rows = _logged_rows(log_ws)
+    assert len(rows) == 1
+    assert rows[0][1] == "moved_out"
+    assert rows[0][6] == "Julia"
+    assert rows[0][7] == "346"
+    assert rows[0][8] == "FL5"
+    assert rows[0][9] == -75.0
+
+
+def test_move_person_out_with_zero_tab_just_clears_the_room():
+    ws, log_ws, service = _occupancy_sheet(
+        [["346", "Julia"], ["FL5", ""]],
+        [[0.0], [0.0]],
+        cells=[(45, 9, 0.0)],
+    )
+
+    fl_label = service.move_person_out("June 2026", "346")
+
+    assert fl_label == ""
+    assert ws.batch_updates == [[{"range": "B45", "values": [[""]]}, {"range": "I45", "values": [[0.0]]}]]
+    rows = _logged_rows(log_ws)
+    assert rows[0][1] == "moved_out"
+    assert rows[0][8] == ""
+
+
+def test_move_person_out_raises_when_no_fl_slot_free():
+    ws, log_ws, service = _occupancy_sheet(
+        [["346", "Julia"], ["FL5", "Gustav"]],
+        [[-150.0], [0.0]],
+        cells=[(45, 9, "-75,00 kr")],
+    )
+
+    with pytest.raises(ValueError, match="No FL slot is free at all"):
+        service.move_person_out("June 2026", "346")
+
+    assert ws.batch_updates == []
+
+
+def test_move_person_between_accounts_logs_swap_rows_with_shared_action_id():
+    ws, log_ws, service = _occupancy_sheet(
+        [["346", "Julia"], ["347", "Johannes"]],
+        [[0.0], [0.0]],
+        cells=[(45, 9, -75.0), (46, 9, 100.0)],
+    )
+
+    service.move_person_between_accounts("June 2026", "346", "347")
+
+    rows = _logged_rows(log_ws)
+    assert [row[1] for row in rows] == ["moved", "moved"]
+    assert rows[0][3] == rows[1][3] != ""
+    assert rows[0][4] == rows[1][4] == "June 2026"
+    assert {rows[0][6], rows[1][6]} == {"Julia", "Johannes"}
+
+
+def test_delete_fl_person_logs_deleted_row():
+    ws, log_ws, service = _occupancy_sheet(
+        [["FL1", "Gustav"]],
+        [[0.0]],
+    )
+
+    service.delete_fl_person("June 2026", "Gustav")
+
+    rows = _logged_rows(log_ws)
+    assert len(rows) == 1
+    assert rows[0][1] == "deleted"
+    assert rows[0][6] == "Gustav"
+    assert rows[0][7] == "FL1"
+
+
+def test_replace_room_person_logs_moved_in_and_moved_out_pair():
+    ws, log_ws, service = _occupancy_sheet(
+        [["346", "Julia"], ["FL4", ""], ["FL5", ""]],
+        [[100.0], [0.0], [0.0]],
+        cells=[(45, 9, 100.0)],
+    )
+
+    fl_label = service.replace_room_person("June 2026", "346", "Kasper")
+
+    assert fl_label == "FL5"  # departing person goes to the HIGHEST free slot
+    rows = _logged_rows(log_ws)
+    assert [row[1] for row in rows] == ["moved_in", "moved_out"]
+    assert rows[0][3] == rows[1][3] != ""
+    assert rows[0][6] == "Kasper" and rows[0][8] == "346"
+    assert rows[1][6] == "Julia" and rows[1][7] == "346" and rows[1][8] == "FL5"
+
+
+def test_occupancy_actions_succeed_when_log_sheet_is_missing():
+    ws, _, service = _occupancy_sheet(
+        [["346", "Julia"], ["FL5", ""]],
+        [[-150.0], [0.0]],
+        cells=[(45, 9, -75.0)],
+        with_log=False,
+    )
+
+    fl_label = service.move_person_out("June 2026", "346")
+
+    assert fl_label == "FL5"
+    assert len(ws.batch_updates) == 1

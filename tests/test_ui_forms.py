@@ -90,6 +90,9 @@ def _month_setup_app():
         def create_month_sheet(self, month_name, year):
             pass
 
+        def check_month_sheet_integrity(self, worksheet_name):
+            return st.session_state.get("stub_integrity", [])
+
         def copy_balances_from_previous_month(self, month_name, year):
             st.session_state["stub_copied"] = (month_name, year)
             return SimpleNamespace(

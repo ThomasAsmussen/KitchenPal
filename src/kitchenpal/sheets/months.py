@@ -59,6 +59,28 @@ class MonthSheetsMixin:
             [{"range": f"B{PERSONAL_ACCOUNT_TABLE_START_ROW}:B{end_row}", "values": values}]
         )
 
+    def check_month_sheet_integrity(self, worksheet_name: str) -> list[str]:
+        # Month sheets are made by hand; a missing closing formula makes a
+        # row's balance read as 0 and silently vanish at the next rollover.
+        worksheet = self.get_worksheet(worksheet_name)
+        label_rows = worksheet.batch_get([PERSONAL_ACCOUNT_TABLE_RANGE])[0]
+        formula_rows = worksheet.batch_get([PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE], value_render_option="FORMULA")[0]
+        problems = []
+        for index, row in enumerate(label_rows):
+            padded = row + [""] * 2
+            label = str(padded[0] or "").strip()
+            if not label:
+                continue
+            formula_row = formula_rows[index] if index < len(formula_rows) else []
+            formula = str(formula_row[0]) if formula_row and formula_row[0] is not None else ""
+            if not formula.startswith("="):
+                row_number = PERSONAL_ACCOUNT_TABLE_START_ROW + index
+                problems.append(
+                    f"{worksheet_name}: account row {label} has no closing-balance formula in Z{row_number} — "
+                    "balances on this row read as 0 and vanish at the next rollover."
+                )
+        return problems
+
     def copy_balances_from_previous_month(self, month_name: str, year: int):
         month_number = _month_number(month_name)
         previous_month_index = (month_number - 2) % 12

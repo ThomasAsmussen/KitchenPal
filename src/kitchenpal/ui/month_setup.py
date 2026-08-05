@@ -152,6 +152,8 @@ def render_month_creation_section(service: SheetsService):
             bump_cache_version()
             st.session_state["manage_people_preferred_month"] = (MONTH_TO_NUMBER[month], year)
             st.success(f"New sheet created: {month} {year}")
+            for problem in service.check_month_sheet_integrity(f"{month} {year}"):
+                st.warning(problem)
         except ValueError as exc:
             show_user_error(st, exc, "Could not create the month sheet")
 
@@ -268,15 +270,42 @@ def render_people_management_section(service: SheetsService):
                 except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
                     show_user_error(st, exc, "Could not move person")
 
+    named_room_entries = [entry for entry in room_entries if entry.name]
+    if named_room_entries:
+        with st.form(key=f"move_out_form_{people_sheet}"):
+            person_moving_out = st.selectbox(
+                "Person moving out",
+                named_room_entries,
+                format_func=lambda entry: f"{entry.label} — {entry.name} ({entry.balance:.2f} DKK)",
+                key=f"person_moving_out_{people_sheet}",
+            )
+            st.caption("A non-zero tab is parked in an FL slot and chased; a settled tab just frees the room.")
+            if st.form_submit_button("Move person out"):
+                try:
+                    fl_label = service.move_person_out(people_sheet, person_moving_out.label)
+                    bump_cache_version()
+                    if fl_label:
+                        st.success(f"Moved {person_moving_out.name} out of {person_moving_out.label}; balance parked at {fl_label}.")
+                    else:
+                        st.success(f"Moved {person_moving_out.name} out of {person_moving_out.label}; nothing to chase.")
+                    st.rerun()
+                except (ValueError, gspread.exceptions.WorksheetNotFound) as exc:
+                    show_user_error(st, exc, "Could not move person out")
+
     with st.form(key=f"add_fl_person_form_{people_sheet}"):
         new_fl_person = st.text_input(
-            "New person without a room",
-            help="Use this for people who should have an account but do not live in a room.",
+            "New person arriving (parked in FL1-FL3 until next month)",
+            help="Mid-month arrivals stay in an FL slot for the rest of the month and move into their room at the next rollover.",
             key=f"new_fl_person_{people_sheet}",
         )
-        if st.form_submit_button("Add person without a room"):
+        intended_room = st.selectbox(
+            "Room they take over at the next rollover (optional)",
+            [""] + [entry.label for entry in room_entries],
+            key=f"intended_room_{people_sheet}",
+        )
+        if st.form_submit_button("Park arriving person"):
             try:
-                fl_label = service.add_person_as_fl(people_sheet, new_fl_person)
+                fl_label = service.add_person_as_fl(people_sheet, new_fl_person, intended_room=intended_room)
                 bump_cache_version()
                 st.success(f"Added {new_fl_person.strip()} to {fl_label}.")
                 st.rerun()
