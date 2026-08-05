@@ -36,6 +36,7 @@ Manual tasks for Thomas (the app can't do these):
 # Constraints
 
 - This repo is PUBLIC. Never write sheet data, roster data, or credentials anywhere inside the repo directory — dumps go to ~/.cache/kitchenpal/.
+- Branches: commit to claude-worklog ONLY. Never push or merge to main — Thomas merges deliberately once a chunk is reviewed and he wants it live. (Both branches are identical up to b6b5b26; that predates this rule.)
 
 # Copy-balances contract (protected, v2 — implemented 2026-08-05)
 
