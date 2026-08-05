@@ -79,6 +79,55 @@ def test_purchase_form_accepts_negative_amount_for_deposit_refund():
     assert at.session_state["stub_purchase"][1:] == ("Pant retur", -25.0)
 
 
+def _month_setup_app():
+    import streamlit as st
+
+    from kitchenpal.ui.month_setup import render_month_creation_section
+
+    class StubService:
+        def create_month_sheet(self, month_name, year):
+            pass
+
+        def copy_balances_from_previous_month(self, month_name, year):
+            st.session_state["stub_copied"] = (month_name, year)
+
+    render_month_creation_section(StubService())
+
+
+def test_copy_balances_controls_react_outside_a_form():
+    # Widgets inside st.form do not rerun the script until submit, so an
+    # in-form confirmation checkbox can never re-enable a submit button that
+    # was rendered disabled — the flow deadlocks. These controls must be
+    # regular reactive widgets.
+    at = AppTest.from_function(_month_setup_app).run()
+
+    assert at.selectbox(key="update_month").form_id == ""
+    assert at.selectbox(key="update_year").form_id == ""
+    assert at.checkbox(key="confirm_copy_balances").form_id == ""
+
+
+def test_copy_balances_label_names_source_month_with_year_rollover():
+    at = AppTest.from_function(_month_setup_app).run()
+
+    at.selectbox(key="update_month").select("January")
+    at.selectbox(key="update_year").select(2027).run()
+
+    label = at.checkbox(key="confirm_copy_balances").label
+    assert "January 2027" in label
+    assert "December 2026" in label
+
+
+def test_copy_balances_button_runs_copy_after_confirmation():
+    at = AppTest.from_function(_month_setup_app).run()
+
+    at.selectbox(key="update_month").select("July").run()
+    at.checkbox(key="confirm_copy_balances").check().run()
+    at.button(key="copy_balances_button").click().run()
+
+    assert not at.exception
+    assert at.session_state["stub_copied"] == ("July", 2026)
+
+
 def test_purchase_edit_form_prefills_negative_amount():
     from types import SimpleNamespace
 

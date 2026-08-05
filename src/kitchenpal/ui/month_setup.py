@@ -130,6 +130,12 @@ def render_month_setup_view(service: SheetsService):
     render_admin_view(service)
 
 
+def _previous_month_and_year(month_number: int, year: int) -> tuple[str, int]:
+    previous_index = (month_number - 2) % 12
+    previous_year = year - 1 if month_number == 1 else year
+    return ENGLISH_MONTHS[previous_index], previous_year
+
+
 def render_month_creation_section(service: SheetsService):
     st.header("1. Create a month sheet")
     current_year = datetime.now().year
@@ -150,14 +156,18 @@ def render_month_creation_section(service: SheetsService):
             show_user_error(st, exc, "Could not create the month sheet")
 
     st.header("2. Copy names and balances from last month")
-    with st.form(key="update_month_form"):
-        update_month = st.selectbox("Month to update", ENGLISH_MONTHS, key="update_month")
-        update_year = st.selectbox("Year ", [current_year, current_year + 1], key="update_year")
-        confirm_copy = st.checkbox(
-            f"I have checked that the {update_month} {update_year} sheet exists and should receive last month's balances.",
-            key="confirm_copy_balances",
-        )
-        submitted = st.form_submit_button("Copy names and balances", disabled=not confirm_copy)
+    # No st.form here: the checkbox must rerun the script to re-enable the
+    # button, and the label must follow the selected month — form widgets do
+    # neither until submit, which deadlocks a disabled submit button.
+    update_month = st.selectbox("Month to update", ENGLISH_MONTHS, key="update_month")
+    update_year = st.selectbox("Year ", [current_year, current_year + 1], key="update_year")
+    previous_month_name, previous_month_year = _previous_month_and_year(MONTH_TO_NUMBER[update_month], update_year)
+    confirm_copy = st.checkbox(
+        f"I have checked that the {update_month} {update_year} sheet exists and should "
+        f"receive the balances from {previous_month_name} {previous_month_year}.",
+        key="confirm_copy_balances",
+    )
+    submitted = st.button("Copy names and balances", key="copy_balances_button", disabled=not confirm_copy)
 
     if submitted:
         try:

@@ -898,3 +898,21 @@ def test_populate_cooks_for_month_writes_room_numbers_to_day_rows():
             {"range": "C5", "values": [[359]]},
         ]
     ]
+
+
+def test_copy_balances_from_previous_month_january_reads_december_of_previous_year():
+    previous = FakeWorksheet("December 2026")
+    previous.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
+    previous.set_batch_get("Z45:Z65", [["100,00 kr"], ["-50,00 kr"]])
+    previous.set_batch_get("AG37", [["2.000,00 kr"]])
+
+    current = FakeWorksheet("January 2027")
+    current.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
+    service = build_service(FakeSpreadsheet([previous, current]))
+
+    service.copy_balances_from_previous_month("January", 2027)
+
+    updates = current.batch_updates[0]
+    assert updates[0]["values"] == [["Julia"], ["Johannes"]]
+    assert updates[1]["values"] == [[100.0], [-50.0]]
+    assert updates[2]["values"] == [[1, 2027]]
