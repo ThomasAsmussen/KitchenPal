@@ -410,7 +410,12 @@ def render_availability_planner(service: SheetsService):
         st.info("Click Refresh data if the sheet was renamed or deleted directly in Google Sheets.")
         return
     planning_entries = _get_cached_planning_entries(service, month_name, year)
-    stored_entries = {entry.person: entry for entry in planning_entries}
+    # Stored preferences are looked up by room label, the identity the Planning
+    # sheet keys rows on. The name in the sheet is only what the month sheet
+    # called the occupant at save time, so it must never be the lookup key.
+    stored_entries = {
+        str(entry.room_number).strip(): entry for entry in planning_entries if str(entry.room_number).strip()
+    }
     people_list = [entry.name or entry.label for entry in room_entries]
 
     possible_days = get_weekdays_in_month(year, month)
@@ -438,11 +443,11 @@ def render_availability_planner(service: SheetsService):
         return
 
     for person in people_list:
-        stored_entry = stored_entries.get(person)
         room_entry = room_entry_by_name.get(person) or room_entry_by_label.get(person)
         if room_entry is None:
             st.warning(f"Skipping {person}: no matching room entry was found.")
             continue
+        stored_entry = stored_entries.get(room_entry.label)
 
         cannot_host_default = _default_cannot_host_this_month(
             room_entry.label,

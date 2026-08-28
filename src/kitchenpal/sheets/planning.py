@@ -14,6 +14,22 @@ from ..constants import (
 from .models import PlanningEntry
 
 
+def _planning_row_identity(year, month_name: str, room_number, person: str) -> tuple:
+    """The stable identity of a planning row.
+
+    A row belongs to a ROOM, not to whatever the month sheet happened to call
+    its occupant when the row was written. The name in column C is display
+    only: it is refreshed on every save. Keying on the name instead flipped a
+    person's identity whenever B45:B65 changed (a fresh sheet blanks it, a
+    copy-balances run fills it back in), which orphaned their preferences and
+    appended a duplicate row on the next save.
+    """
+    room = str(room_number or "").strip()
+    if room:
+        return (str(year), month_name, "room", room)
+    return (str(year), month_name, "name", " ".join(str(person or "").strip().lower().split()))
+
+
 class PlanningSheetsMixin:
     def get_or_create_planning_worksheet(self):
         try:
@@ -32,7 +48,7 @@ class PlanningSheetsMixin:
         worksheet = self.get_or_create_planning_worksheet()
         existing_values = worksheet.get_all_values()
         replacement_rows = {
-            (str(year), month_name, entry.person): [
+            _planning_row_identity(year, month_name, entry.room_number, entry.person): [
                 year,
                 month_name,
                 entry.person,
@@ -50,8 +66,11 @@ class PlanningSheetsMixin:
 
         for row in existing_values[1:]:
             padded_row = row + [""] * (len(PLANNING_HEADERS) - len(row))
-            row_key = (str(padded_row[0]), padded_row[1], padded_row[2])
+            row_key = _planning_row_identity(padded_row[0], padded_row[1], padded_row[3], padded_row[2])
             if row_key in replacement_rows:
+                # The first row for this room is replaced in place; any further
+                # rows for the same room are duplicates left behind by the old
+                # name-keyed matching, so this save collapses them.
                 if row_key not in replaced_keys:
                     final_rows.append(replacement_rows[row_key])
                     replaced_keys.add(row_key)

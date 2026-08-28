@@ -1,4 +1,10 @@
-# Where we are (updated 2026-08-05, end of session)
+# Where we are (updated 2026-08-28)
+
+2026-08-28: fixed the September planning corruption reported from production — the
+Planning sheet is now keyed by room label instead of the occupant's name (see
+"Planning sheet identity" below). Suite at 150 passed.
+
+# Where we are (2026-08-05, end of session)
 
 Landed today (main == claude-worklog, suite at 146 passed):
 - Bug fixes: feedback form clears after submit (3c14956), negative purchase amounts for pant (9211df8), planning calendar usable on phones (5ce1d9e), copy-balances button deadlock + frozen label (4c7f3ca).
@@ -82,6 +88,20 @@ Special rows and creation:
   kept) right after duplicating the template, so a fresh sheet always arrives in
   a known state whatever names the template holds. Do not detect template names
   by comparing against Skabelon — a real resident's name could match.
+
+# Planning sheet identity
+
+A Planning row belongs to a ROOM, not to a person's name. `save_planning_entries`
+matches existing rows on (year, month, Room); column C (Name) is display only and is
+refreshed on every save. Rows with a blank Room fall back to a normalized-name key.
+The UI looks stored preferences up by `room_entry.label` for the same reason.
+
+Why: the UI identifies people as `entry.name or entry.label` from the month sheet's
+B45:B65. That cell legitimately changes (create_month_sheet blanks it, copy-balances
+fills it back in, occupancy actions rewrite it), so name-keyed rows flipped identity
+underneath residents: their preferences stopped loading, the picker came up empty, and
+saving appended a duplicate row while the old one kept the room number as its "name".
+A save now also collapses any duplicate rows a room accumulated under the old scheme.
 
 # Log sheet schema (append-only)
 

@@ -562,6 +562,117 @@ def test_save_planning_entries_appends_person_when_no_request_exists():
     )
 
 
+def test_save_planning_entries_matches_the_room_not_the_stored_name():
+    # The Planning row for a room may have been written while the month sheet
+    # had no name for it (a fresh sheet blanks B45:B65), so column C holds the
+    # room number. The next save must update that row, not append a second one.
+    ws = FakeWorksheet("Planning")
+    ws.set_all_values(
+        [
+            ["Year", "Month", "Name", "Room", "Can", "Cannot", "Prefers", "Max 1 day"],
+            ["2026", "September", "348", "348", "16, 21", "", "", "FALSE"],
+            ["2026", "September", "350", "350", "1, 2, 3, 8, 9, 10", "", "", "FALSE"],
+        ]
+    )
+
+    service = build_service(FakeSpreadsheet([ws]))
+    service.save_planning_entries(
+        "September",
+        2026,
+        [
+            PlanningEntry(
+                person="Josefine",
+                room_number="350",
+                available_dates="1, 2, 3, 7, 8, 9, 10",
+                unavailable_dates="",
+                preferred_dates="",
+                limit_one_day=False,
+            )
+        ],
+    )
+
+    assert ws.updated_ranges[1] == (
+        "A2:H3",
+        [
+            ["2026", "September", "348", "348", "16, 21", "", "", "FALSE"],
+            [2026, "September", "Josefine", "350", "1, 2, 3, 7, 8, 9, 10", "", "", "FALSE"],
+        ],
+    )
+
+
+def test_save_planning_entries_collapses_duplicate_rows_for_one_room():
+    # Rows the old name-keyed matching left behind: the same room twice, once
+    # under the room number and once under the person's name.
+    ws = FakeWorksheet("Planning")
+    ws.set_all_values(
+        [
+            ["Year", "Month", "Name", "Room", "Can", "Cannot", "Prefers", "Max 1 day"],
+            ["2026", "September", "350", "350", "1, 2, 3, 8, 9, 10", "", "", "FALSE"],
+            ["2026", "September", "352", "352", "13, 23", "", "", "FALSE"],
+            ["2026", "September", "Josefine", "350", "1, 2, 3, 7, 8, 9, 10", "", "", "FALSE"],
+        ]
+    )
+
+    service = build_service(FakeSpreadsheet([ws]))
+    service.save_planning_entries(
+        "September",
+        2026,
+        [
+            PlanningEntry(
+                person="Josefine",
+                room_number="350",
+                available_dates="2, 3",
+                unavailable_dates="",
+                preferred_dates="3",
+                limit_one_day=True,
+            )
+        ],
+    )
+
+    assert ws.updated_ranges[1] == (
+        "A2:H3",
+        [
+            [2026, "September", "Josefine", "350", "2, 3", "", "3", "TRUE"],
+            ["2026", "September", "352", "352", "13, 23", "", "", "FALSE"],
+        ],
+    )
+
+
+def test_save_planning_entries_keeps_rows_without_a_room_apart():
+    ws = FakeWorksheet("Planning")
+    ws.set_all_values(
+        [
+            ["Year", "Month", "Name", "Room", "Can", "Cannot", "Prefers", "Max 1 day"],
+            ["2026", "September", "Gustav", "", "1", "", "", "FALSE"],
+            ["2026", "September", "Astrid", "", "2", "", "", "FALSE"],
+        ]
+    )
+
+    service = build_service(FakeSpreadsheet([ws]))
+    service.save_planning_entries(
+        "September",
+        2026,
+        [
+            PlanningEntry(
+                person="Astrid",
+                room_number="",
+                available_dates="3",
+                unavailable_dates="",
+                preferred_dates="",
+                limit_one_day=False,
+            )
+        ],
+    )
+
+    assert ws.updated_ranges[1] == (
+        "A2:H3",
+        [
+            ["2026", "September", "Gustav", "", "1", "", "", "FALSE"],
+            [2026, "September", "Astrid", "", "3", "", "", "FALSE"],
+        ],
+    )
+
+
 def test_get_possible_days_limit_reads_saved_month_limit():
     ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
     ws.set_all_values(
