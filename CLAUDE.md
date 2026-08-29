@@ -511,6 +511,23 @@ the right — never insert, rename, or repurpose. The rollover may read parked_f
 to SUGGEST completions but acts only on explicit confirmation and falls back to sheet
 state detection when the Log says nothing.
 
+# Deployment
+
+Community Cloud runs the app from GitHub with `streamlit run streamlit_app.py`,
+which puts `src/` on the path. Two things about that environment have bitten:
+
+- It picks its own Python and resolves unpinned dependencies at deploy time. It
+  was running Python 3.14 while everything here is tested on 3.12, with
+  gspread/pandas/ortools unpinned. requirements.txt now pins every version to
+  what the tests run against; set the Python version to 3.12 in the app's
+  Advanced settings, because there is no file for it.
+- An error during IMPORT leaves the module tree half-built, and Streamlit reruns
+  the script rather than dying. The second symptom is then
+  UnserializableReturnValueError from a cached read: st.cache_data pickles what
+  it stores, and a dataclass built against one copy of a class cannot be pickled
+  against another. Chase the FIRST error in the Cloud logs; the cache error is
+  usually its shadow, not a separate fault.
+
 # Tests
 
 - `python -m pytest tests/ -q` — AppTest harness, runs headless.

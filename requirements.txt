@@ -1,5 +1,12 @@
+# Pinned to the versions the tests actually run against. Community Cloud
+# otherwise resolves whatever is newest at deploy time, on whatever Python
+# version the app was created with — which is how a deployment ends up in an
+# environment nobody has ever run the tests in.
+#
+# These pins assume Python 3.12 (what we develop and test on). Set that in the
+# app's Advanced settings on Community Cloud; there is no file for it.
 streamlit==1.57.0
-gspread
-oauth2client
-pandas
-ortools
+gspread==6.2.1
+oauth2client==4.1.3
+pandas==3.0.3
+ortools==9.15.6755
