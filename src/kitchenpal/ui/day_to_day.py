@@ -640,13 +640,22 @@ def _swap_dialog(service: SheetsService, context, sheet_name: str, day: int, roo
     else:
         st.caption(f"{taker.name or taker.label} is not cooking any other night this month.")
 
+    # A swap is its own inverse, so swap_dinner's "is this still your night?"
+    # guard cannot tell a replayed click from a genuine swap back the other way.
+    # One test click ended up applied twice from a reconnecting tab, so the
+    # dialog refuses to fire the same swap twice within a session.
+    done_key = f"swapped_{sheet_name}_{day}_{taker.label}_{other_day}"
     if not st.button("Swap", type="primary", use_container_width=True, key=f"swap_go_{sheet_name}_{day}"):
+        return
+    if st.session_state.get(done_key):
+        st.caption("That swap has already gone through.")
         return
     try:
         service.swap_dinner(sheet_name, day, room, taker.label, other_day=other_day, by=room)
     except ValueError as exc:
         show_user_error(st, exc, "Could not swap the dinner")
         return
+    st.session_state[done_key] = True
     data.clear_dinners()
     st.toast(
         f"{taker.name or taker.label} has the {day}{_ordinal(day)}"

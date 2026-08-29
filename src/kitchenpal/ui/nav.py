@@ -57,6 +57,31 @@ def page_styles(active_slug: str) -> str:
     padding-bottom: calc(5.6rem + env(safe-area-inset-bottom)) !important;
   }}
 
+  /* Streamlit's header is 60px tall, absolutely positioned and painted over the
+     page. Below 400px Streamlit itself drops the main container's top padding to
+     2.2rem — 35px — so the first thing on every screen, the identity chip, loses
+     its ascenders behind the header. Measured, not guessed: the chip's top sat
+     at y=51 under a header ending at y=60.
+
+     Their rule uses this exact selector and !important, so an identical
+     selector only ties and loses on order. Hence the extra ancestor: specificity
+     is the only way to win, and it must stay ahead of theirs. */
+  @media (max-width: 400px) {{
+    [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {{
+      padding-top: 4.5rem !important;
+    }}
+  }}
+
+  /* Streamlit Community Cloud floats its own badge in the bottom-right corner,
+     exactly where the House tab is. Hide the ones we know, and out-rank
+     anything else that lands there: on a phone the way back to House matters
+     more than a badge. */
+  [data-testid="stStatusWidget"],
+  [data-testid="manage-app-button"],
+  [class*="viewerBadge"] {{
+    display: none !important;
+  }}
+
   .kp-kicker {{
     font-size: .68rem;
     letter-spacing: .12em;
@@ -128,7 +153,7 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpalnav {{
     position: fixed;
     left: 0; right: 0; bottom: 0;
-    z-index: 1000;
+    z-index: 999999;
     background: {bar_bg};
     border-top: 1px solid {line};
     box-shadow: {shadow};

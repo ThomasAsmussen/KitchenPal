@@ -100,6 +100,14 @@ on a personal screen:
   navigation collapses into a hamburger on a phone, which is the hiding we are
   ending. Read the docstring in ui/nav.py before touching that CSS — the bar is
   matched with `.st-key-kpalnav` exactly, never `[class*=]`.
+- Two things the bar has to survive on a real phone, both measured rather than
+  guessed: Streamlit Community Cloud floats its own badge in the bottom-right
+  corner, exactly over the House tab (hidden by selector, and the bar's z-index
+  raised so anything else that lands there loses); and below 400px Streamlit sets
+  `padding-top: 2.2rem !important` on the main container with the SAME selector
+  we use, which put the identity chip's ascenders behind the 60px header. An
+  identical selector only ties and loses on order, so ours carries an extra
+  ancestor — keep it more specific than theirs.
 - ui/identity.py asks once which room you are and keeps it in the query string, so a
   bookmark remembers you. It is a claim, not a login: nothing is locked to it, every
   form still shows the room it will write to, and room selectboxes merely default to
@@ -383,6 +391,13 @@ and refuses when the sheet no longer agrees about who is cooking, because the
 screen offering the swap may be a minute old. Both people get a Log row sharing
 one action id — nobody is asked to consent (this is a house, not a workflow
 engine), but an argument about it would need the record.
+
+That staleness guard CANNOT catch a replayed click: a swap is its own inverse,
+so a repeat looks exactly like a genuine swap back the other way. One test click
+was applied twice from a browser tab reconnecting to a restarted server, which is
+how this was found. The dialog now refuses the same swap twice within a session.
+That is a mitigation, not a proof — a replay arriving as a fresh session would
+still get through, and the Log is where a double swap would be spotted.
 
 # The Plan tab (rebuilt 2026-08-29)
 
