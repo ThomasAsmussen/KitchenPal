@@ -11,9 +11,10 @@ from kitchenpal.sheets.utils import parse_month_sheet_name
 from kitchenpal.sheets_service import SheetsService
 
 # The fixture is a real export of the spreadsheet, so it carries roster data and
-# must be able to live outside this public repo. Point KITCHENPAL_TEST_SHEET at
-# it wherever it is kept; these tests skip when it is not there.
-TEST_SHEET_PATH = os.environ.get("KITCHENPAL_TEST_SHEET", "test_sheet.xlsx")
+# lives outside this public repo, next to the CSV dumps. Override the location
+# with KITCHENPAL_TEST_SHEET; these tests skip when the file is not there.
+DEFAULT_TEST_SHEET_PATH = os.path.expanduser("~/.cache/kitchenpal/test_sheet.xlsx")
+TEST_SHEET_PATH = os.environ.get("KITCHENPAL_TEST_SHEET", DEFAULT_TEST_SHEET_PATH)
 
 
 class OpenpyxlWritableAdapter:
@@ -106,7 +107,10 @@ class FakeSpreadsheetAdapter:
 
 def _copy_test_sheet():
     if not os.path.exists(TEST_SHEET_PATH):
-        pytest.skip(f"sheet fixture not found at {TEST_SHEET_PATH}; set KITCHENPAL_TEST_SHEET")
+        pytest.skip(
+            f"sheet fixture not found at {TEST_SHEET_PATH} — export the spreadsheet there "
+            "or point KITCHENPAL_TEST_SHEET at a copy"
+        )
     tmp = tempfile.NamedTemporaryFile(prefix="kitchenpal_test_", suffix=".xlsx", delete=False)
     tmp.close()
     shutil.copy(TEST_SHEET_PATH, tmp.name)

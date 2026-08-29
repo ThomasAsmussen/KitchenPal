@@ -1,4 +1,4 @@
-from ..constants import DANISH_MONTHS, ENGLISH_MONTHS
+from ..constants import DANISH_MONTHS, ENGLISH_MONTHS, NON_PERSON_ACCOUNT_LABELS
 
 
 def format_room_label(value) -> str:
@@ -19,6 +19,41 @@ def format_date_value(value) -> str:
     if hasattr(value, "strftime"):
         return value.strftime("%Y-%m-%d")
     return str(value)
+
+
+def is_room_label(value) -> bool:
+    """A room in the house: 346-360. FL slots are not rooms."""
+    label = format_room_label(value)
+    return bool(label) and label.isdigit()
+
+
+def ordinal(number) -> str:
+    """1st, 2nd, 3rd, 4th — "the 31th" is how a summary looks unwritten."""
+    value = int(number)
+    if 10 <= (value % 100) <= 20:
+        return f"{value}th"
+    return f"{value}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(value % 10, 'th') }".replace(" ", "")
+
+
+def is_person_account_label(value) -> bool:
+    """A row that belongs to a person: a room, or an FL slot. Never Spotify."""
+    normalized = str(value or "").strip().upper()
+    return normalized.isdigit() or (normalized.startswith("FL") and normalized[2:].isdigit())
+
+
+def is_occupied_account(label, name) -> bool:
+    """An account that is a person right now.
+
+    A room counts when someone lives in it; an FL slot counts only when it holds
+    a name — an empty FL is a placeholder, not a housemate. Accounting rows like
+    Spotify are never people.
+    """
+    text = format_room_label(label)
+    if not text or text in NON_PERSON_ACCOUNT_LABELS:
+        return False
+    if not is_data_room_label(text):
+        return False
+    return bool(str(name or "").strip())
 
 
 def is_data_room_label(value) -> bool:

@@ -6,6 +6,9 @@ from .sheets.accounts import AccountSheetsMixin
 from .sheets.day_to_day import DayToDaySheetsMixin
 from .sheets.feedback import FeedbackSheetsMixin
 from .sheets.models import (
+    AccountStatement,
+    AndetRow,
+    DayRow,
     DayToDayEntries,
     DaySummary,
     DrinkEntry,
@@ -35,10 +38,28 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
         return [ws.title for ws in self._spreadsheet.worksheets()]
 
     def get_worksheet(self, worksheet_name: str):
-        return self._spreadsheet.worksheet(worksheet_name)
+        """A worksheet handle, kept once we have it.
+
+        gspread's Spreadsheet.worksheet() re-fetches the whole sheet list on
+        every call — a round trip of its own before any data is read. Holding
+        the handle turned out to be a third of every page's traffic.
+        """
+        cache = self.__dict__.setdefault("_worksheet_cache", {})
+        worksheet = cache.get(worksheet_name)
+        if worksheet is None:
+            worksheet = self._spreadsheet.worksheet(worksheet_name)
+            cache[worksheet_name] = worksheet
+        return worksheet
+
+    def forget_worksheets(self) -> None:
+        """Drop the handles: a sheet was added, renamed or deleted."""
+        self.__dict__.pop("_worksheet_cache", None)
 
 
 __all__ = [
+    "AccountStatement",
+    "AndetRow",
+    "DayRow",
     "DayToDayEntries",
     "DaySummary",
     "DrinkEntry",

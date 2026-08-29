@@ -62,6 +62,48 @@ class DayToDayEntries:
 
 
 @dataclass(frozen=True)
+class AccountStatement:
+    """A person's month: the closing balance and the parts that made it."""
+
+    label: str
+    name: str
+    balance: float
+    components: dict
+
+
+@dataclass(frozen=True)
+class AndetRow:
+    """A shared cost with no date: who paid, what it was, and who was in on it."""
+
+    row_number: int
+    payer: str
+    description: str
+    amount: float
+    participants: dict
+
+    @property
+    def head_count(self) -> int:
+        return sum(self.participants.values())
+
+    @property
+    def share(self) -> float:
+        return self.amount / self.head_count if self.head_count else 0.0
+
+
+@dataclass(frozen=True)
+class DayRow:
+    """One dinner day, read with the whole month in a single call."""
+
+    day: int
+    chef: str
+    menu: str
+    menu_description: str
+    signed_up: int
+    meal_price: float
+    signups: dict
+
+
+@dataclass(frozen=True)
 class DaySummary:
     chef: str
     menu: str

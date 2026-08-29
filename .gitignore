@@ -10,3 +10,6 @@ __pycache__/
 koekkenregnskab-3d-ny-040a2ee5b105.json
 .cache/
 .playwright-mcp/
+# Sheet exports carry roster data: they live in ~/.cache/kitchenpal/
+test_sheet.xlsx
+.~lock.*#

@@ -46,25 +46,27 @@ class MonthSheetsMixin:
 
         template_sheet = self.get_worksheet(self._template_sheet_name)
         self._spreadsheet.duplicate_sheet(template_sheet.id, new_sheet_name=new_sheet_name)
-        self._blank_person_names(new_sheet_name)
+        self.forget_worksheets()
+        self._prepare_new_month_sheet(new_sheet_name, _month_number(month_name), year)
 
-    def _blank_person_names(self, worksheet_name: str) -> None:
-        # A freshly created month sheet must arrive in a known state whatever
-        # names the template holds: person rows blank, non-person rows kept.
+    def _prepare_new_month_sheet(self, worksheet_name: str, month_number: int, year: int) -> None:
+        # A freshly created month sheet must arrive in a known state whatever the
+        # template holds: person rows blank, non-person rows kept, and the month
+        # it is actually for. Without the month, the sheet computes its weekdays
+        # and dates from whatever the template was last used for.
         worksheet = self.get_worksheet(worksheet_name)
         rows = worksheet.batch_get([PERSONAL_ACCOUNT_TABLE_RANGE])[0]
-        if not rows:
-            return
-        values = []
-        for row in rows:
-            padded = row + [""] * 2
-            label = str(padded[0] or "").strip()
-            name = str(padded[1] or "")
-            values.append([""] if _is_data_room_label(label) else [name])
-        end_row = PERSONAL_ACCOUNT_TABLE_START_ROW + len(values) - 1
-        worksheet.batch_update(
-            [{"range": f"B{PERSONAL_ACCOUNT_TABLE_START_ROW}:B{end_row}", "values": values}]
-        )
+        updates = [{"range": MONTH_METADATA_RANGE, "values": [[month_number, year]]}]
+        if rows:
+            values = []
+            for row in rows:
+                padded = row + [""] * 2
+                label = str(padded[0] or "").strip()
+                name = str(padded[1] or "")
+                values.append([""] if _is_data_room_label(label) else [name])
+            end_row = PERSONAL_ACCOUNT_TABLE_START_ROW + len(values) - 1
+            updates.append({"range": f"B{PERSONAL_ACCOUNT_TABLE_START_ROW}:B{end_row}", "values": values})
+        worksheet.batch_update(updates)
 
     def check_month_sheet_integrity(self, worksheet_name: str) -> list[str]:
         # Month sheets are made by hand, and every range the app reads is a row

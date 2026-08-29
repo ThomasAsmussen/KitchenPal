@@ -1,0 +1,4 @@
+[theme]
+# The app's own accent instead of Streamlit's red: the same petrol as the
+# bottom bar's active tab, so the primary action and the current tab agree.
+primaryColor = "#0E514C"

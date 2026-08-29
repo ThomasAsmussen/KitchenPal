@@ -5,6 +5,7 @@ import streamlit as st
 
 from ..runtime_state import bump_cache_version, cache_key, get_cache_version
 from ..sheets_service import SheetsService
+from . import data
 from .errors import show_user_error
 
 
@@ -34,27 +35,7 @@ FEEDBACK_SECTIONS = {
 }
 
 
-def _get_cached_feedback_entries(service: SheetsService, feedback_type: str):
-    key = cache_key("feedback_entries", feedback_type)
-    if key not in st.session_state:
-        st.session_state[key] = service.get_feedback_entries(feedback_type)
-    return st.session_state[key]
-
-
-def _render_refresh_button(key: str):
-    loaded_at_key = f"{key}_loaded_at:{get_cache_version()}"
-    if loaded_at_key not in st.session_state:
-        st.session_state[loaded_at_key] = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%H:%M")
-    col1, col2 = st.columns([1, 4])
-    if col1.button("Refresh data", key=key):
-        bump_cache_version()
-        st.rerun()
-    col2.caption(f"Loaded from Google Sheets at {st.session_state[loaded_at_key]}.")
-
-
 def render_feedback_view(service: SheetsService):
-    st.title("Feedback")
-    _render_refresh_button("feedback_refresh")
 
     feature_tab, bug_tab = st.tabs([FEEDBACK_SECTIONS["feature"]["title"], FEEDBACK_SECTIONS["bug"]["title"]])
 
@@ -67,7 +48,7 @@ def render_feedback_view(service: SheetsService):
 
 def render_feedback_section(service: SheetsService, feedback_type: str):
     config = FEEDBACK_SECTIONS[feedback_type]
-    entries = _get_cached_feedback_entries(service, feedback_type)
+    entries = data.feedback_entries(service, feedback_type)
     active_entries = [entry for entry in entries if entry.status.lower() not in ("done", "fixed")]
     done_entries = [entry for entry in entries if entry.status.lower() in ("done", "fixed")]
 
@@ -108,6 +89,7 @@ def render_feedback_form(service: SheetsService, feedback_type: str, config: dic
                 return
             try:
                 service.add_feedback_entry(feedback_type, name, title, details)
+                data.clear_feedback()
                 bump_cache_version()
                 st.success(config["success"])
                 st.rerun()
@@ -139,6 +121,7 @@ def render_feedback_entries(
                         service.mark_feedback_entry_done(feedback_type, entry.row_number)
                     elif action == "delete":
                         service.delete_feedback_entry(feedback_type, entry.row_number)
+                    data.clear_feedback()
                     bump_cache_version()
                     st.rerun()
                 except ValueError as exc:

@@ -10,7 +10,6 @@ from kitchenpal.ui.day_to_day import (
     _meal_price_for_edit,
     _meal_price_per_person_display,
     _month_sheet_names,
-    _month_entries_cache_key,
     _next_available_row,
     _purchase_date_for_edit,
     _range_end_row,
@@ -76,10 +75,13 @@ def test_delete_confirmation_key_is_scoped_to_kind_and_sheet():
     assert _delete_confirmation_key("purchase", "May 2026") == "day_to_day_confirm_delete_purchase:May 2026"
 
 
-def test_month_entries_cache_key_uses_cache_version(monkeypatch):
-    monkeypatch.setattr(day_to_day, "cache_key", lambda prefix, *parts: f"{prefix}:v7:{':'.join(parts)}")
+def test_month_reads_are_cached_for_the_whole_house_not_per_session():
+    # session_state caching meant twenty residents fetched the same sheet twenty
+    # times, against one shared API budget.
+    from kitchenpal.ui import data
 
-    assert _month_entries_cache_key("May 2026") == "day_to_day_month_entries:v7:May 2026"
+    for reader in (data.room_entries, data.day_rows, data.month_entries, data.andet_rows):
+        assert hasattr(reader, "clear"), f"{reader} should be an st.cache_data reader"
 
 
 def test_month_sheet_names_keeps_only_english_or_danish_month_year_names():

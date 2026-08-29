@@ -34,6 +34,9 @@ class TransactionTableLayout:
 class DaySheetLayout:
     day_offset: int
     menu_column: int
+    chef_column: int
+    signup_count_column: int
+    last_day_row: int
     signup_header_range: str
     drink_table_range: str
 
@@ -58,6 +61,9 @@ SHEET_LAYOUT = SheetLayout(
     day=DaySheetLayout(
         day_offset=2,
         menu_column=4,
+        chef_column=3,
+        signup_count_column=7,
+        last_day_row=33,
         signup_header_range="I2:AB2",
         drink_table_range="AI3:AK21",
     ),
@@ -101,6 +107,16 @@ SHEET_LAYOUT = SheetLayout(
 
 DAY_SHEET_DAY_OFFSET = SHEET_LAYOUT.day.day_offset
 DAY_SHEET_MENU_COLUMN = SHEET_LAYOUT.day.menu_column
+DAY_SHEET_CHEF_COLUMN = SHEET_LAYOUT.day.chef_column
+DAY_SHEET_SIGNUP_COUNT_COLUMN = SHEET_LAYOUT.day.signup_count_column
+DAY_SHEET_LAST_DAY_ROW = SHEET_LAYOUT.day.last_day_row
+
+# "Andet" — a dinner without a date. Same columns as a day row, so the sheet
+# splits it the same way: the payer is credited F, and everyone marked in I:AB
+# is charged the price per head. Twenty slots, verified 2026-08-29.
+ANDET_FIRST_ROW = 34
+ANDET_LAST_ROW = 53
+ANDET_ROW_CAPACITY = ANDET_LAST_ROW - ANDET_FIRST_ROW + 1
 DAY_SHEET_MEAL_PRICE_COLUMN = 6
 DAY_SHEET_MENU_DESCRIPTION_COLUMN = 48
 DAY_SHEET_SIGNUP_HEADER_RANGE = SHEET_LAYOUT.day.signup_header_range
@@ -119,6 +135,20 @@ PERSONAL_ACCOUNT_KOVS_HEADER_RANGE = SHEET_LAYOUT.personal_account.kovs_header_r
 PERSONAL_ACCOUNT_KOVS_SEARCH_START_ROW = SHEET_LAYOUT.personal_account.kovs_search_start_row
 PERSONAL_ACCOUNT_KOVS_SEARCH_END_ROW = SHEET_LAYOUT.personal_account.kovs_search_end_row
 PERSONAL_ACCOUNT_TRANSACTION_TOTAL_RANGE = SHEET_LAYOUT.personal_account.transaction_total_range
+
+# The columns behind a person's closing balance, in the order the sheet lays them
+# out between "Fra sidste måned" (I) and "Saldo" (Z). Verified 2026-08-29.
+PERSONAL_ACCOUNT_COMPONENT_COLUMNS = (
+    ("carried_in", 9),    # I  Fra sidste måned
+    ("interest", 12),     # L  Rente
+    ("drinks", 14),       # N  KØVS
+    ("cooked", 16),       # P  Mad udlæg
+    ("dinners", 18),      # R  Mad forbrug
+    ("purchases", 20),    # T  Indkøb
+    ("dues", 22),         # V  Kontingent
+    ("payments", 24),     # X  Indbetalt/udbetalt
+)
+PERSONAL_ACCOUNT_BALANCE_COLUMN = 26  # Z  Saldo
 
 DRINK_TABLE_RANGE = SHEET_LAYOUT.day.drink_table_range
 

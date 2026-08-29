@@ -11,12 +11,14 @@ from ..constants import (
     PERSONAL_ACCOUNT_KOVS_HEADER_RANGE,
     PERSONAL_ACCOUNT_KOVS_SEARCH_END_ROW,
     PERSONAL_ACCOUNT_KOVS_SEARCH_START_ROW,
+    PERSONAL_ACCOUNT_BALANCE_COLUMN,
+    PERSONAL_ACCOUNT_COMPONENT_COLUMNS,
     PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN,
     PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE,
     PERSONAL_ACCOUNT_TABLE_RANGE,
     PERSONAL_ACCOUNT_TABLE_START_ROW,
 )
-from .models import PersonalAccountEntry, RoomEntry
+from .models import AccountStatement, PersonalAccountEntry, RoomEntry
 from .utils import (
     format_room_label as _format_room_label,
     normalized_person_name as _normalized_person_name,
@@ -24,17 +26,18 @@ from .utils import (
     parse_month_sheet_name as _parse_month_sheet_name,
     resolve_month_sheet_name as _resolve_month_sheet_name,
 )
-
-
-def _is_person_account_label(label: str) -> bool:
-    normalized = str(label or "").strip().upper()
-    return normalized.isdigit() or (normalized.startswith("FL") and normalized[2:].isdigit())
+from .utils import is_person_account_label as _is_person_account_label
 
 
 class AccountSheetsMixin:
     def get_room_entries(self, worksheet_name: str) -> List[RoomEntry]:
         worksheet = self.get_worksheet(worksheet_name)
-        signup_header = worksheet.batch_get([DAY_SHEET_SIGNUP_HEADER_RANGE])[0][0]
+        # Both ranges in one request: the signup header and the account table
+        # are always read together.
+        header_rows, account_rows = worksheet.batch_get(
+            [DAY_SHEET_SIGNUP_HEADER_RANGE, PERSONAL_ACCOUNT_TABLE_RANGE]
+        )
+        signup_header = header_rows[0] if header_rows else []
         signup_columns = {}
         for column_index, label in enumerate(signup_header, start=9):
             if label is None:
@@ -43,7 +46,6 @@ class AccountSheetsMixin:
             if label_str:
                 signup_columns[label_str] = column_index
 
-        account_rows = worksheet.batch_get([PERSONAL_ACCOUNT_TABLE_RANGE])[0]
         room_entries: List[RoomEntry] = []
 
         for row_offset, row in enumerate(account_rows, start=PERSONAL_ACCOUNT_TABLE_START_ROW):
@@ -70,6 +72,27 @@ class AccountSheetsMixin:
 
     def get_room_entry_map(self, worksheet_name: str) -> dict[str, RoomEntry]:
         return {entry.label: entry for entry in self.get_room_entries(worksheet_name)}
+
+    def get_account_statement(self, worksheet_name: str, room_entry: RoomEntry) -> AccountStatement:
+        """One person's row of the ledger, read in a single call.
+
+        The sheet already computes every part of a balance; the app's job is to
+        say which is which, not to add anything up again.
+        """
+        worksheet = self.get_worksheet(worksheet_name)
+        row_number = room_entry.account_row
+        values = worksheet.batch_get([f"A{row_number}:Z{row_number}"])[0]
+        cells = (list(values[0]) if values else []) + [""] * PERSONAL_ACCOUNT_BALANCE_COLUMN
+
+        components = {
+            name: _parse_amount_value(cells[column - 1]) for name, column in PERSONAL_ACCOUNT_COMPONENT_COLUMNS
+        }
+        return AccountStatement(
+            label=_format_room_label(cells[0]),
+            name=str(cells[1] or "").strip(),
+            balance=_parse_amount_value(cells[PERSONAL_ACCOUNT_BALANCE_COLUMN - 1]),
+            components=components,
+        )
 
     def get_personal_account_entries(self, worksheet_name: str) -> List[PersonalAccountEntry]:
         worksheet = self.get_worksheet(worksheet_name)
@@ -117,9 +140,12 @@ class AccountSheetsMixin:
         ]
 
     def _first_available_fl_entry(self, worksheet_name: str, *, for_arrival: bool = False) -> PersonalAccountEntry | None:
-        # Arrivals need to sign up for dinners, so they take the LOWEST free
-        # signup-capable slot (FL1-FL3). Departed debtors only hold a balance,
-        # so they take the HIGHEST free slot (FL5 down), keeping FL1-FL3 free.
+        # Arrivals fill from the bottom (FL1 up), leftover tabs from the top
+        # (FL5 down), so the two never compete for the same row and a departure
+        # lands where copy-balances would have chased it anyway. The
+        # signup-column filter stays as a guard: an arrival who cannot be
+        # signed up for dinners is useless. Every FL slot carries one since the
+        # 2026-08-29 layout change, so today it excludes nothing.
         free_entries = self._free_fl_entries(worksheet_name)
         if not free_entries:
             return None
@@ -167,7 +193,10 @@ class AccountSheetsMixin:
             raise ValueError(f"{person} already has an account in {worksheet_name}.")
 
         if not self._free_fl_entries(worksheet_name):
-            raise ValueError("No FL slot is free at all.")
+            raise ValueError(
+                f"Every row without a room in {worksheet_name} is taken. Remove someone who has "
+                "settled up, or move one of them into a room."
+            )
         fl_entry = self._first_available_fl_entry(worksheet_name, for_arrival=True)
         if fl_entry is None:
             raise ValueError(
@@ -222,7 +251,10 @@ class AccountSheetsMixin:
         if entry.balance != 0:
             fl_entry = self._first_available_fl_entry(worksheet_name)
             if fl_entry is None:
-                raise ValueError("No FL slot is free at all.")
+                raise ValueError(
+                    f"{entry.name} owes money, and every row without a room in {worksheet_name} is "
+                    "taken, so there is nowhere to park the tab. Remove someone who has settled up."
+                )
             fl_label = fl_entry.label
             updates.extend(
                 [
@@ -255,6 +287,96 @@ class AccountSheetsMixin:
             ]
         )
         return fl_label
+
+    def rename_person(self, worksheet_name: str, label: str, new_person_name: str, by: str = "") -> str:
+        """Fix the spelling of a name. Same person, same row, same balance.
+
+        Deliberately NOT replace_room_person: that treats a new name as a new
+        person and moves the old one out to an FL slot, which is exactly wrong
+        for a typo. The row is found by LABEL rather than by name, so a rename
+        still works on a sheet that has the duplicate names it is there to fix.
+        """
+        new_person = str(new_person_name).strip()
+        if not new_person:
+            raise ValueError("Enter a person name.")
+
+        target = str(label).strip()
+        entry = self._account_entries_by_label(worksheet_name).get(target)
+        if entry is None or not _is_person_account_label(entry.label):
+            raise ValueError(f"'{label}' is not a person's account in {worksheet_name}.")
+        if not entry.name:
+            raise ValueError(f"{entry.label} has nobody in it to rename.")
+
+        previous_name = entry.name
+        if _normalized_person_name(previous_name) != _normalized_person_name(new_person):
+            for other in self.get_personal_account_entries(worksheet_name):
+                if other.label == entry.label or not other.name:
+                    continue
+                if _normalized_person_name(other.name) == _normalized_person_name(new_person):
+                    raise ValueError(f"{new_person} already has account {other.label} in {worksheet_name}.")
+
+        worksheet = self.get_worksheet(worksheet_name)
+        worksheet.batch_update([{"range": f"B{entry.row_number}", "values": [[new_person]]}])
+        also = self._spread_rename(worksheet_name, previous_name, new_person)
+
+        summary = f"{previous_name} in {entry.label} is now spelled {new_person}."
+        if also:
+            summary += f" Corrected on {' and '.join(also)} too, so the balance keeps carrying over."
+        self._log_safely(
+            [
+                LogEntry(
+                    event="renamed",
+                    summary=summary,
+                    action_id=self._new_action_id(),
+                    month_sheet=worksheet_name,
+                    by=by,
+                    person=new_person,
+                    from_label=entry.label,
+                    to_label=entry.label,
+                )
+            ]
+        )
+        return entry.label
+
+    def _adjacent_month_sheet_names(self, worksheet_name: str) -> list[str]:
+        parsed = _parse_month_sheet_name(worksheet_name)
+        if parsed is None:
+            return []
+        month_number, year = parsed
+        neighbours = [
+            (12 if month_number == 1 else month_number - 1, year - 1 if month_number == 1 else year),
+            (1 if month_number == 12 else month_number + 1, year + 1 if month_number == 12 else year),
+        ]
+        existing = self.list_sheets()
+        found = [_resolve_month_sheet_name(existing, month, sheet_year) for month, sheet_year in neighbours]
+        return [name for name in found if name]
+
+    def _spread_rename(self, worksheet_name: str, previous_name: str, new_person: str) -> list[str]:
+        """Carry a spelling fix to the months either side of this one.
+
+        copy-balances matches people BY NAME, so a name corrected on one sheet
+        and not its neighbour makes the same human look like two: the new
+        spelling starts at 0.00 and the old one is chased into an FL row as a
+        departed debtor. Only an unambiguous single match is touched.
+        """
+        corrected = []
+        key = _normalized_person_name(previous_name)
+        for neighbour in self._adjacent_month_sheet_names(worksheet_name):
+            try:
+                matches = [
+                    entry
+                    for entry in self.get_personal_account_entries(neighbour)
+                    if entry.name and _normalized_person_name(entry.name) == key
+                ]
+            except Exception:  # noqa: BLE001 - a neighbour we cannot read is left alone
+                continue
+            if len(matches) != 1:
+                continue
+            self.get_worksheet(neighbour).batch_update(
+                [{"range": f"B{matches[0].row_number}", "values": [[new_person]]}]
+            )
+            corrected.append(neighbour)
+        return corrected
 
     def replace_room_person(self, worksheet_name: str, room_label: str, new_person_name: str) -> str:
         new_person = str(new_person_name).strip()
@@ -305,7 +427,10 @@ class AccountSheetsMixin:
 
         fl_entry = existing_new_person or self._first_available_fl_entry(worksheet_name)
         if fl_entry is None:
-            raise ValueError("No FL slot is free at all.")
+            raise ValueError(
+                f"{target_entry.name} has to go somewhere, and every row without a room in "
+                f"{worksheet_name} is taken. Remove someone who has settled up first."
+            )
 
         replaced_person = target_entry.name
         target_previous_balance = _parse_amount_value(

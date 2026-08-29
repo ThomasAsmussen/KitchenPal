@@ -460,7 +460,7 @@ def test_get_drink_entries_skips_header_row():
     assert [entry.wine for entry in entries] == [1]
 
 
-def test_create_month_sheet_duplicates_template_and_blanks_person_names():
+def test_create_month_sheet_blanks_person_names_and_stamps_the_month():
     # A new month sheet must arrive in a known state whatever the template
     # holds: person names blanked, non-person rows (Spotify) left untouched.
     template = FakeWorksheet("Template", worksheet_id=999)
@@ -477,7 +477,10 @@ def test_create_month_sheet_duplicates_template_and_blanks_person_names():
     assert spreadsheet.duplicate_calls == [(999, "November 2026")]
     new_sheet = spreadsheet.worksheet("November 2026")
     assert new_sheet.batch_updates == [
-        [{"range": "B56:B58", "values": [[""], [""], ["Daniel Vorting"]]}]
+        [
+            {"range": constants.MONTH_METADATA_RANGE, "values": [[11, 2026]]},
+            {"range": "B56:B58", "values": [[""], [""], ["Daniel Vorting"]]},
+        ]
     ]
 
 
@@ -690,12 +693,18 @@ def test_get_possible_days_limit_reads_saved_month_limit():
     assert service.get_possible_days_limit("July", 2026) == ""
 
 
-def test_get_possible_days_limit_initializes_blank_sheet():
+def test_get_possible_days_limit_reads_a_blank_sheet_without_writing_to_it():
+    # Reading no longer checks for the header: that check cost a whole extra
+    # round trip on a page that is about to read the values anyway. Saving still
+    # writes the header when the sheet is empty.
     ws = FakeWorksheet(constants.POSSIBLE_DAYS_SHEET_NAME)
     service = build_service(FakeSpreadsheet([ws]))
 
     assert service.get_possible_days_limit("May", 2026) == ""
-    assert ws.updated_ranges == [(constants.POSSIBLE_DAYS_HEADER_RANGE, [constants.POSSIBLE_DAYS_HEADERS])]
+    assert ws.updated_ranges == []
+
+    service.save_possible_days_limit("May", 2026, "1-10")
+    assert ws.updated_ranges[0] == (constants.POSSIBLE_DAYS_HEADER_RANGE, [constants.POSSIBLE_DAYS_HEADERS])
 
 
 def test_save_possible_days_limit_updates_existing_month_without_overwriting_others():
@@ -945,6 +954,184 @@ def test_replace_room_person_allows_empty_room():
             {"range": "I56", "values": [[0.0]]},
         ]
     ]
+
+
+def _swap_sheet(chefs):
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get("C3:C33", [[chef] for chef in chefs])
+    return ws
+
+
+def test_swap_dinner_hands_a_night_over():
+    ws = _swap_sheet(["346", "", "352"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.swap_dinner("June 2026", 1, "346", "352")
+
+    assert ws.batch_updates == [[{"range": "C3", "values": [["352"]]}]]
+
+
+def test_swap_dinner_trades_two_nights():
+    ws = _swap_sheet(["346", "", "352"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.swap_dinner("June 2026", 1, "346", "352", other_day=3)
+
+    assert ws.batch_updates == [
+        [{"range": "C3", "values": [["352"]]}, {"range": "C5", "values": [["346"]]}]
+    ]
+
+
+def test_swap_dinner_says_the_date_the_way_people_do():
+    from kitchenpal.sheets.utils import ordinal
+
+    assert [ordinal(day) for day in (1, 2, 3, 11, 12, 13, 21, 31)] == [
+        "1st", "2nd", "3rd", "11th", "12th", "13th", "21st", "31st"
+    ]
+
+
+def test_swap_dinner_refuses_when_the_sheet_has_moved_on():
+    # The screen offering the swap may be a minute old, and by then somebody
+    # else may already have taken the night.
+    ws = _swap_sheet(["350", "", "352"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="not down to cook"):
+        service.swap_dinner("June 2026", 1, "346", "352")
+    assert ws.batch_updates == []
+
+
+def test_swap_dinner_refuses_a_night_the_other_person_no_longer_has():
+    ws = _swap_sheet(["346", "", "355"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="not down to cook"):
+        service.swap_dinner("June 2026", 1, "346", "352", other_day=3)
+    assert ws.batch_updates == []
+
+
+def test_rename_person_only_rewrites_the_name():
+    # A typo is the same person: no FL slot, no balance moved, no second row.
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get(
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
+        [["346", "Johanes"], ["347", "Julia"], ["FL1", ""], ["FL2", ""]],
+    )
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[-1778.0], [0.0], [0.0], [0.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    label = service.rename_person("June 2026", "346", "Johannes")
+
+    assert label == "346"
+    assert ws.batch_updates == [[{"range": "B56", "values": [["Johannes"]]}]]
+
+
+def test_rename_person_corrects_the_neighbouring_months_too():
+    # copy-balances matches people by name, so a spelling fixed on one sheet and
+    # not the next makes one human look like two: the new spelling starts at
+    # 0.00 and the old one is chased into FL as a departed debtor.
+    june = FakeWorksheet("June 2026")
+    june.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Sylvestr"], ["347", "Julia"]])
+    june.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[-8.13], [0.0]])
+    may = FakeWorksheet("May 2026")
+    may.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Sylvestr"], ["347", "Julia"]])
+    may.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[-8.13], [0.0]])
+    service = build_service(FakeSpreadsheet([june, may]))
+
+    service.rename_person("June 2026", "346", "Sylvester")
+
+    assert june.batch_updates == [[{"range": "B56", "values": [["Sylvester"]]}]]
+    assert may.batch_updates == [[{"range": "B56", "values": [["Sylvester"]]}]]
+
+
+def test_rename_person_leaves_an_ambiguous_neighbour_alone():
+    june = FakeWorksheet("June 2026")
+    june.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Sylvestr"]])
+    june.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
+    may = FakeWorksheet("May 2026")
+    may.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Sylvestr"], ["FL1", "Sylvestr"]])
+    may.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [0.0]])
+    service = build_service(FakeSpreadsheet([june, may]))
+
+    service.rename_person("June 2026", "346", "Sylvester")
+
+    assert june.batch_updates == [[{"range": "B56", "values": [["Sylvester"]]}]]
+    assert may.batch_updates == []
+
+
+def test_rename_person_refuses_a_name_another_row_already_has():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get(
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Johannes"], ["347", "Julia"]]
+    )
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [0.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="already has account 347"):
+        service.rename_person("June 2026", "346", "Julia")
+    assert ws.batch_updates == []
+
+
+def test_rename_person_works_on_a_sheet_that_has_duplicates():
+    # Duplicates are what renaming is for, so the row is found by label.
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get(
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Julia"]]
+    )
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [0.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.rename_person("June 2026", "347", "Julie")
+
+    assert ws.batch_updates == [[{"range": "B57", "values": [["Julie"]]}]]
+
+
+def test_rename_person_accepts_a_change_of_spacing_or_case():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "julia  hansen"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.rename_person("June 2026", "346", "Julia Hansen")
+
+    assert ws.batch_updates == [[{"range": "B56", "values": [["Julia Hansen"]]}]]
+
+
+def test_rename_person_refuses_an_empty_row():
+    ws = FakeWorksheet("June 2026")
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", ""]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="nobody in it"):
+        service.rename_person("June 2026", "346", "Julia")
+
+
+def test_departures_take_the_highest_fl_slot_and_arrivals_the_lowest():
+    # Deliberate, and the reason a displaced person lands on FL5 while FL2 is
+    # free: FL1-FL3 carry signup columns and are kept for people who arrive.
+    def sheet():
+        ws = FakeWorksheet("June 2026")
+        ws.set_batch_get(
+            constants.PERSONAL_ACCOUNT_TABLE_RANGE,
+            [["346", "Julia"], ["FL1", ""], ["FL2", ""], ["FL3", ""], ["FL4", ""], ["FL5", ""]],
+        )
+        ws.set_batch_get(
+            constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE,
+            [[-100.0], [0.0], [0.0], [0.0], [0.0], [0.0]],
+        )
+        ws.set_batch_get(
+            constants.DAY_SHEET_SIGNUP_HEADER_RANGE,
+            [["346", "FL1", "FL2", "FL3"]],
+        )
+        ws.set_cell(56, 9, -100.0)
+        return ws
+
+    leaving = sheet()
+    assert build_service(FakeSpreadsheet([leaving])).move_person_out("June 2026", "346") == "FL5"
+
+    arriving = sheet()
+    assert build_service(FakeSpreadsheet([arriving])).add_person_as_fl("June 2026", "New Person") == "FL1"
 
 
 def test_move_person_between_accounts_moves_to_empty_account():
@@ -1583,7 +1770,7 @@ def test_add_person_as_fl_reports_when_no_slot_free_at_all():
         [[0.0]] * 5,
     )
 
-    with pytest.raises(ValueError, match="No FL slot is free at all"):
+    with pytest.raises(ValueError, match="Remove someone who has settled up"):
         service.add_person_as_fl("June 2026", "Kasper")
 
 
@@ -1637,7 +1824,7 @@ def test_move_person_out_raises_when_no_fl_slot_free():
         cells=[(56, 9, "-75,00 kr")],
     )
 
-    with pytest.raises(ValueError, match="No FL slot is free at all"):
+    with pytest.raises(ValueError, match="Remove someone who has settled up"):
         service.move_person_out("June 2026", "346")
 
     assert ws.batch_updates == []

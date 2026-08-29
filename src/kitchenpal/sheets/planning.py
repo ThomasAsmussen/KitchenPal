@@ -31,16 +31,17 @@ def _planning_row_identity(year, month_name: str, room_number, person: str) -> t
 
 
 class PlanningSheetsMixin:
-    def get_or_create_planning_worksheet(self):
+    def get_or_create_planning_worksheet(self, ensure_header: bool = True):
+        """ensure_header=False skips a whole read: the caller is about to read anyway."""
         try:
             worksheet = self.get_worksheet(PLANNING_SHEET_NAME)
         except gspread.exceptions.WorksheetNotFound:
             worksheet = self._spreadsheet.add_worksheet(title=PLANNING_SHEET_NAME, rows=200, cols=len(PLANNING_HEADERS))
+            self.forget_worksheets()
             worksheet.update(range_name=PLANNING_HEADER_RANGE, values=[PLANNING_HEADERS])
             return worksheet
 
-        values = worksheet.get_all_values()
-        if not values:
+        if ensure_header and not worksheet.get_all_values():
             worksheet.update(range_name=PLANNING_HEADER_RANGE, values=[PLANNING_HEADERS])
         return worksheet
 
@@ -88,7 +89,7 @@ class PlanningSheetsMixin:
             worksheet.update(range_name=f"A2:H{row_count}", values=final_rows)
 
     def get_planning_entries(self, month_name: str, year: int) -> List[PlanningEntry]:
-        worksheet = self.get_or_create_planning_worksheet()
+        worksheet = self.get_or_create_planning_worksheet(ensure_header=False)
         values = worksheet.get_all_values()[1:]
         entries = []
 
@@ -113,21 +114,21 @@ class PlanningSheetsMixin:
 
         return entries
 
-    def get_or_create_possible_days_worksheet(self):
+    def get_or_create_possible_days_worksheet(self, ensure_header: bool = True):
         try:
             worksheet = self.get_worksheet(POSSIBLE_DAYS_SHEET_NAME)
         except gspread.exceptions.WorksheetNotFound:
             worksheet = self._spreadsheet.add_worksheet(title=POSSIBLE_DAYS_SHEET_NAME, rows=100, cols=len(POSSIBLE_DAYS_HEADERS))
+            self.forget_worksheets()
             worksheet.update(range_name=POSSIBLE_DAYS_HEADER_RANGE, values=[POSSIBLE_DAYS_HEADERS])
             return worksheet
 
-        values = worksheet.get_all_values()
-        if not values:
+        if ensure_header and not worksheet.get_all_values():
             worksheet.update(range_name=POSSIBLE_DAYS_HEADER_RANGE, values=[POSSIBLE_DAYS_HEADERS])
         return worksheet
 
     def get_possible_days_limit(self, month_name: str, year: int) -> str:
-        worksheet = self.get_or_create_possible_days_worksheet()
+        worksheet = self.get_or_create_possible_days_worksheet(ensure_header=False)
         values = worksheet.get_all_values()[1:]
 
         for row in values:

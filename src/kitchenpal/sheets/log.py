@@ -51,7 +51,10 @@ class LogSheetsMixin:
             values["timestamp"] = entry.timestamp or stamp
             rows.append([values[_FIELD_BY_HEADER[header]] for header in LOG_HEADERS])
 
-        worksheet.append_rows(rows, value_input_option="USER_ENTERED")
+        # RAW, never USER_ENTERED: on a Danish-locale spreadsheet Sheets parses
+        # "September 2026" as a date and hands it back as "september 2026", which
+        # silently breaks every reader that matches on the month sheet name.
+        worksheet.append_rows(rows, value_input_option="RAW")
 
     def get_log_entries(self) -> list[LogEntry]:
         worksheet = self.get_worksheet(LOG_SHEET_NAME)

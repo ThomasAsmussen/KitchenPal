@@ -6,9 +6,15 @@ from gspread.utils import rowcol_to_a1
 
 from ..a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
 from ..constants import (
+    ANDET_FIRST_ROW,
+    ANDET_LAST_ROW,
+    ANDET_ROW_CAPACITY,
+    DAY_SHEET_CHEF_COLUMN,
     DAY_SHEET_DAY_OFFSET,
+    DAY_SHEET_LAST_DAY_ROW,
     DAY_SHEET_MEAL_PRICE_COLUMN,
     DAY_SHEET_MENU_COLUMN,
+    DAY_SHEET_SIGNUP_COUNT_COLUMN,
     DAY_SHEET_MENU_DESCRIPTION_COLUMN,
     DAY_SHEET_SIGNUP_HEADER_RANGE,
     DRINK_TABLE_RANGE,
@@ -31,17 +37,36 @@ from ..constants import (
     TRANSACTION_ROW_CAPACITY,
     TRANSACTION_TABLE_RANGE,
 )
-from .models import DaySummary, DayToDayEntries, DrinkEntry, PersonalAccountEntry, PurchaseEntry, RoomEntry, TransactionEntry
+from .log import LogEntry
+from .models import (
+    AndetRow,
+    DayRow,
+    DaySummary,
+    DayToDayEntries,
+    DrinkEntry,
+    PersonalAccountEntry,
+    PurchaseEntry,
+    RoomEntry,
+    TransactionEntry,
+)
 from .utils import (
     format_date_value as _format_date_value,
     format_room_label as _format_room_label,
     is_data_room_label as _is_data_room_label,
     is_payout_type as _is_payout_type,
     normalized_person_name as _normalized_person_name,
+    ordinal,
     parse_amount_value as _parse_amount_value,
     parse_month_sheet_name as _parse_month_sheet_name,
     row_has_content as _row_has_content,
 )
+
+
+def _parse_signup_count(value) -> int:
+    try:
+        return int(str(value).strip() or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _parse_optional_meal_price(value) -> float:
@@ -103,6 +128,238 @@ class DayToDaySheetsMixin:
             meal_price=_read_optional_meal_price(padded_row[3]),
             menu_description=str(description or "").strip(),
         )
+
+    def get_day_rows(self, worksheet_name: str, room_entries: List[RoomEntry]) -> List[DayRow]:
+        """Every dinner day of the month in one read.
+
+        The Dinner screen needs tonight, the next few days and the days you are
+        cooking; asking day by day would be thirty round trips.
+        """
+        worksheet = self.get_worksheet(worksheet_name)
+        first_row = 1 + DAY_SHEET_DAY_OFFSET
+        description_column = rowcol_to_a1(1, DAY_SHEET_MENU_DESCRIPTION_COLUMN)[:-1]
+        values, descriptions = worksheet.batch_get(
+            [
+                f"A{first_row}:AB{DAY_SHEET_LAST_DAY_ROW}",
+                f"{description_column}{first_row}:{description_column}{DAY_SHEET_LAST_DAY_ROW}",
+            ]
+        )
+        signup_columns = {
+            entry.label: entry.signup_column for entry in room_entries if entry.signup_column is not None
+        }
+
+        rows: List[DayRow] = []
+        for index, row in enumerate(values):
+            padded = list(row) + [""] * 28
+            if not str(padded[0] or "").strip():
+                # past the end of the month
+                continue
+            description_row = descriptions[index] if index < len(descriptions) else []
+            rows.append(
+                DayRow(
+                    day=index + 1,
+                    chef=_format_room_label(padded[DAY_SHEET_CHEF_COLUMN - 1]),
+                    menu=str(padded[DAY_SHEET_MENU_COLUMN - 1] or "").strip(),
+                    menu_description=str((description_row[0] if description_row else "") or "").strip(),
+                    signed_up=_parse_signup_count(padded[DAY_SHEET_SIGNUP_COUNT_COLUMN - 1]),
+                    meal_price=_read_optional_meal_price(padded[DAY_SHEET_MEAL_PRICE_COLUMN - 1]),
+                    signups={
+                        label: _parse_signup_count(padded[column - 1]) for label, column in signup_columns.items()
+                    },
+                )
+            )
+        return rows
+
+    def get_andet_rows(self, worksheet_name: str, room_entries: List[RoomEntry]) -> List[AndetRow]:
+        """The month's undated shared costs, in one read."""
+        worksheet = self.get_worksheet(worksheet_name)
+        values = worksheet.batch_get([f"A{ANDET_FIRST_ROW}:AB{ANDET_LAST_ROW}"])[0]
+        signup_columns = {
+            entry.label: entry.signup_column for entry in room_entries if entry.signup_column is not None
+        }
+
+        rows: List[AndetRow] = []
+        for index in range(ANDET_ROW_CAPACITY):
+            row = list(values[index]) if index < len(values) else []
+            padded = row + [""] * 28
+            description = str(padded[DAY_SHEET_MENU_COLUMN - 1] or "").strip()
+            payer = _format_room_label(padded[DAY_SHEET_CHEF_COLUMN - 1])
+            amount = _read_optional_meal_price(padded[DAY_SHEET_MEAL_PRICE_COLUMN - 1])
+            participants = {
+                label: _parse_signup_count(padded[column - 1])
+                for label, column in signup_columns.items()
+                if _parse_signup_count(padded[column - 1])
+            }
+            if not description and not payer and not amount and not participants:
+                continue
+            rows.append(
+                AndetRow(
+                    row_number=ANDET_FIRST_ROW + index,
+                    payer=payer,
+                    description=description,
+                    amount=amount,
+                    participants=participants,
+                )
+            )
+        return rows
+
+    def save_andet(
+        self,
+        worksheet_name: str,
+        payer: int | str,
+        description: str,
+        amount: float,
+        participants: List[str],
+        room_entries: List[RoomEntry],
+        row_number: int | None = None,
+    ) -> int:
+        """Write a shared cost, then let the sheet do the splitting.
+
+        Marking who was in on it is the whole point: the sheet charges every
+        marked account one share and credits the payer the full amount.
+        """
+        if not str(description).strip():
+            raise ValueError("Say what the shared cost was.")
+        if not participants:
+            raise ValueError("Pick at least one person to share the cost.")
+
+        signup_columns = {
+            entry.label: entry.signup_column for entry in room_entries if entry.signup_column is not None
+        }
+        unknown = [label for label in participants if label not in signup_columns]
+        if unknown:
+            raise ValueError(f"These accounts cannot take a share: {', '.join(unknown)}.")
+
+        if row_number is None:
+            taken = {row.row_number for row in self.get_andet_rows(worksheet_name, room_entries)}
+            free = [row for row in range(ANDET_FIRST_ROW, ANDET_LAST_ROW + 1) if row not in taken]
+            if not free:
+                raise ValueError(
+                    f"All {ANDET_ROW_CAPACITY} shared cost rows for {worksheet_name} are in use. "
+                    "Delete one before adding another."
+                )
+            row_number = free[0]
+        elif not ANDET_FIRST_ROW <= row_number <= ANDET_LAST_ROW:
+            raise ValueError("That row is not a shared cost row.")
+
+        worksheet = self.get_worksheet(worksheet_name)
+        updates = [
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_CHEF_COLUMN), "values": [[payer]]},
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_MENU_COLUMN), "values": [[description]]},
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_MEAL_PRICE_COLUMN), "values": [[amount]]},
+        ]
+        for label, column in signup_columns.items():
+            updates.append(
+                {
+                    "range": rowcol_to_a1(row_number, column),
+                    "values": [[1 if label in participants else ""]],
+                }
+            )
+        worksheet.batch_update(updates)
+        return row_number
+
+    def swap_dinner(
+        self,
+        worksheet_name: str,
+        day: int,
+        from_label: str,
+        to_label: str,
+        other_day: int | None = None,
+        by: str = "",
+    ) -> None:
+        """Hand a cooking night over, or trade two of them.
+
+        The chef is one cell per day, so both shapes are the same write: give
+        the day away, and — when the other person is cooking too — take their
+        night in return. Refuses when the sheet no longer agrees about who is
+        cooking, because the screen that offered the swap may be a minute old.
+        """
+        source = str(from_label).strip()
+        target = str(to_label).strip()
+        if not source or not target:
+            raise ValueError("A swap needs both people.")
+        if source == target:
+            raise ValueError("That is already your dinner.")
+
+        first_row = 1 + DAY_SHEET_DAY_OFFSET
+        chef_column = rowcol_to_a1(1, DAY_SHEET_CHEF_COLUMN)[:-1]
+        rows = self.get_worksheet(worksheet_name).batch_get(
+            [f"{chef_column}{first_row}:{chef_column}{DAY_SHEET_LAST_DAY_ROW}"]
+        )[0]
+
+        def chef_on(number: int) -> str:
+            index = number - 1
+            if index < 0 or index >= len(rows):
+                return ""
+            row = list(rows[index]) + [""]
+            return _format_room_label(row[0])
+
+        if chef_on(day) != source:
+            raise ValueError(
+                f"{source} is not down to cook on the {ordinal(day)} any more — reload and look again."
+            )
+        if other_day is not None and chef_on(other_day) != target:
+            raise ValueError(
+                f"{target} is not down to cook on the {ordinal(other_day)} any more — reload and look again."
+            )
+
+        worksheet = self.get_worksheet(worksheet_name)
+        updates = [
+            {"range": rowcol_to_a1(day + DAY_SHEET_DAY_OFFSET, DAY_SHEET_CHEF_COLUMN), "values": [[target]]}
+        ]
+        if other_day is not None:
+            updates.append(
+                {
+                    "range": rowcol_to_a1(other_day + DAY_SHEET_DAY_OFFSET, DAY_SHEET_CHEF_COLUMN),
+                    "values": [[source]],
+                }
+            )
+        worksheet.batch_update(updates)
+
+        action_id = self._new_action_id()
+        if other_day is None:
+            summary = f"{source} gave the dinner on the {ordinal(day)} to {target}."
+        else:
+            summary = f"{source} and {target} swapped the {ordinal(day)} and the {ordinal(other_day)}."
+        entries = [
+            LogEntry(
+                event="swapped_dinner",
+                summary=summary,
+                action_id=action_id,
+                month_sheet=worksheet_name,
+                by=by,
+                person=source,
+                from_label=str(day),
+                to_label=str(other_day) if other_day is not None else "",
+            )
+        ]
+        entries.append(
+            LogEntry(
+                event="swapped_dinner",
+                summary=summary,
+                action_id=action_id,
+                month_sheet=worksheet_name,
+                by=by,
+                person=target,
+                from_label=str(other_day) if other_day is not None else "",
+                to_label=str(day),
+            )
+        )
+        self._log_safely(entries)
+
+    def clear_andet(self, worksheet_name: str, row_number: int, room_entries: List[RoomEntry]) -> None:
+        if not ANDET_FIRST_ROW <= row_number <= ANDET_LAST_ROW:
+            raise ValueError("That row is not a shared cost row.")
+        worksheet = self.get_worksheet(worksheet_name)
+        updates = [
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_CHEF_COLUMN), "values": [[""]]},
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_MENU_COLUMN), "values": [[""]]},
+            {"range": rowcol_to_a1(row_number, DAY_SHEET_MEAL_PRICE_COLUMN), "values": [[""]]},
+        ]
+        for entry in room_entries:
+            if entry.signup_column is not None:
+                updates.append({"range": rowcol_to_a1(row_number, entry.signup_column), "values": [[""]]})
+        worksheet.batch_update(updates)
 
     def get_signed_up_people(self, worksheet_name: str, day: int, room_entries: List[RoomEntry]) -> List[str]:
         worksheet = self.get_worksheet(worksheet_name)

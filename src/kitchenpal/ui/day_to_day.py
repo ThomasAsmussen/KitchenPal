@@ -1,4 +1,5 @@
 import calendar
+import html
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -7,6 +8,7 @@ import streamlit as st
 
 from ..a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
 from ..constants import (
+    ANDET_ROW_CAPACITY,
     DANISH_TO_ENGLISH_MONTH,
     ENGLISH_MONTHS,
     ENGLISH_TO_DANISH_MONTH,
@@ -14,10 +16,13 @@ from ..constants import (
     PURCHASE_ROW_CAPACITY,
     TRANSACTION_ROW_CAPACITY,
 )
-from ..runtime_state import bump_cache_version, cache_key, get_cache_version
-from ..sheets.utils import parse_month_sheet_name
-from ..sheets_service import SheetsService
-from .errors import show_user_error
+from ..sheets.utils import is_occupied_account, is_room_label, ordinal, parse_month_sheet_name
+from ..sheets_service import DayRow, SheetsService
+from . import data
+from .calendar_grid import render_grid
+from .errors import show_user_error, user_error_message
+from .identity import current_room, default_index
+from .month import current_month_sheet, is_current_month, render_month_picker
 
 
 @dataclass(frozen=True)
@@ -36,10 +41,8 @@ def _default_day_index() -> int:
 
 
 def _ordinal(n: int) -> str:
-    n = int(n)
-    if 10 <= (n % 100) <= 20:
-        return "th"
-    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    """Just the suffix: callers write f"{day}{_ordinal(day)}"."""
+    return ordinal(n)[len(str(int(n))):]
 
 
 def _english_month(month_raw: str) -> str:
@@ -51,35 +54,6 @@ def _english_month(month_raw: str) -> str:
             return en
 
     return DANISH_TO_ENGLISH_MONTH.get(m.title(), m)
-
-
-def _get_cached_room_entries(service: SheetsService, worksheet_name: str):
-    key = cache_key("day_to_day_room_entries", worksheet_name)
-    if key not in st.session_state:
-        st.session_state[key] = service.get_room_entries(worksheet_name)
-    return st.session_state[key]
-
-
-def _get_cached_sheet_names(service: SheetsService):
-    key = cache_key("day_to_day_sheet_names")
-    if key not in st.session_state:
-        st.session_state[key] = service.list_sheets()
-    return st.session_state[key]
-
-
-def _month_entries_cache_key(worksheet_name: str) -> str:
-    return cache_key("day_to_day_month_entries", worksheet_name)
-
-
-def _get_cached_month_entries(service: SheetsService, worksheet_name: str, room_entries):
-    key = _month_entries_cache_key(worksheet_name)
-    if key not in st.session_state:
-        st.session_state[key] = service.get_day_to_day_entries(worksheet_name, room_entries)
-    return st.session_state[key]
-
-
-def _invalidate_month_entries(worksheet_name: str):
-    st.session_state.pop(_month_entries_cache_key(worksheet_name), None)
 
 
 def _delete_confirmation_key(kind: str, worksheet_name: str) -> str:
@@ -143,6 +117,16 @@ def _format_amount_dkk(amount: float) -> str:
     return f"{amount:.2f} DKK"
 
 
+def _signed_amount(amount: float) -> str:
+    """A ledger reads as movement, so every row carries its direction."""
+    text = _format_amount_dkk(abs(amount))
+    return f"-{text}" if amount < 0 else f"+{text}"
+
+
+def _esc(value) -> str:
+    return html.escape(str(value if value is not None else ""))
+
+
 def _format_optional_amount_dkk(amount: float) -> str:
     return _format_amount_dkk(amount) if amount else "Not set"
 
@@ -174,19 +158,6 @@ def _meal_price_per_person_display(signed_up: str, meal_price: float) -> str:
     return _format_optional_amount_dkk(price_per_person)
 
 
-def _table_rows(entries, amount_keys=None, exclude_keys=None):
-    amount_keys = amount_keys or []
-    exclude_keys = set(exclude_keys or [])
-    rows = []
-    for entry in entries:
-        row = {key: value for key, value in entry.__dict__.items() if key not in exclude_keys}
-        for key in amount_keys:
-            if key in row:
-                row[key] = _format_amount_dkk(float(row[key]))
-        rows.append(row)
-    return rows
-
-
 def _display_chef(chef: str, room_name_by_label: dict[str, str]) -> str:
     chef_label = str(chef).strip()
     chef_name = room_name_by_label.get(chef_label, "")
@@ -209,21 +180,42 @@ def _sheet_year(worksheet_name: str) -> int:
     return datetime.now().year
 
 
-def _transaction_date_for_edit(value: str, worksheet_name: str) -> date:
+def _parse_sheet_date(value: str, worksheet_name: str) -> date | None:
+    """The sheet writes 03/06, but residents type 2026-06-03 and 3/6/2026 too."""
     text = str(value or "").strip()
     if not text:
-        return datetime.now().date()
+        return None
 
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m"):
         try:
             parsed = datetime.strptime(text, fmt)
-            if fmt == "%d/%m":
-                return parsed.replace(year=_sheet_year(worksheet_name)).date()
-            return parsed.date()
         except ValueError:
             continue
+        if fmt == "%d/%m":
+            return parsed.replace(year=_sheet_year(worksheet_name)).date()
+        return parsed.date()
 
-    return datetime.now().date()
+    return None
+
+
+def _transaction_date_for_edit(value: str, worksheet_name: str) -> date:
+    return _parse_sheet_date(value, worksheet_name) or datetime.now().date()
+
+
+def _short_date(value: str, worksheet_name: str) -> str:
+    parsed = _parse_sheet_date(value, worksheet_name)
+    if parsed is None:
+        return str(value or "").strip() or "No date"
+    return f"{parsed.day} {calendar.month_abbr[parsed.month]}"
+
+
+def _newest_first(entries, worksheet_name: str):
+    """Undated rows sort last; row order breaks ties, so the sheet still shows through."""
+    return sorted(
+        entries,
+        key=lambda entry: (_parse_sheet_date(entry.date, worksheet_name) or date.min, entry.row_number),
+        reverse=True,
+    )
 
 
 def _purchase_date_for_edit(value: str, worksheet_name: str) -> date:
@@ -240,6 +232,13 @@ def _next_available_row(entries, start_row: int, end_row: int | None = None) -> 
     return None
 
 
+def _person_caption(label: str, room_name_by_label: dict[str, str]) -> str:
+    """"Julia · 346" — the name first, because that is how people find themselves."""
+    text = str(label or "").strip()
+    name = room_name_by_label.get(text, "")
+    return f"{name} · {text}" if name else (text or "Unknown")
+
+
 def _room_display_factory(room_name_by_label: dict[str, str]):
     def room_display(label: str) -> str:
         room_name = room_name_by_label.get(label, "")
@@ -248,27 +247,27 @@ def _room_display_factory(room_name_by_label: dict[str, str]):
     return room_display
 
 
-def _render_refresh_button(key: str):
-    loaded_at_key = f"{key}_loaded_at:{get_cache_version()}"
-    if loaded_at_key not in st.session_state:
-        st.session_state[loaded_at_key] = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%H:%M")
-    col1, col2 = st.columns([1, 4])
-    if col1.button("Refresh data", key=key):
-        bump_cache_version()
-        st.rerun()
-    col2.caption(f"Loaded from Google Sheets at {st.session_state[loaded_at_key]}.")
+def identity_room_entries(service: SheetsService):
+    """The people the app can be: this month's accounts."""
+    sheet_name = current_month_sheet(service)
+    if sheet_name is None:
+        return []
+    return [entry for entry in data.room_entries(service, sheet_name) if entry.label.isdigit() or entry.name]
 
 
-def _load_context(service: SheetsService, *, include_month_entries: bool, refresh_key: str) -> DayToDayContext | None:
-    _render_refresh_button(refresh_key)
-
-    sheets_list = _month_sheet_names(_get_cached_sheet_names(service))
-    if not sheets_list:
+def _load_context(service: SheetsService, *, include_month_entries: bool) -> DayToDayContext | None:
+    selected_sheet_name = render_month_picker(service)
+    if selected_sheet_name is None:
         st.warning("No month sheets are available yet.")
         return None
+    return build_month_context(service, selected_sheet_name, include_month_entries=include_month_entries)
 
-    selected_sheet_name = st.selectbox("Month", sheets_list, index=_default_sheet_index(sheets_list))
-    room_entries = _get_cached_room_entries(service, selected_sheet_name)
+
+def build_month_context(
+    service: SheetsService, selected_sheet_name: str, *, include_month_entries: bool
+) -> DayToDayContext | None:
+    """The month's people and rows, without asking which month."""
+    room_entries = data.room_entries(service, selected_sheet_name)
     if not room_entries:
         st.warning("No room mapping is available on this sheet.")
         return None
@@ -277,7 +276,7 @@ def _load_context(service: SheetsService, *, include_month_entries: bool, refres
     room_name_by_label = {entry.label: entry.name for entry in room_entries}
     room_labels = [entry.label for entry in room_entries]
     signup_room_labels = [entry.label for entry in signup_room_entries]
-    month_entries = _get_cached_month_entries(service, selected_sheet_name, room_entries) if include_month_entries else None
+    month_entries = data.month_entries(service, selected_sheet_name) if include_month_entries else None
 
     return DayToDayContext(
         selected_sheet_name=selected_sheet_name,
@@ -316,72 +315,355 @@ def _render_menu_box(day_details, heading: str = "Dinner"):
             st.caption(day_details.menu_description)
 
 
-def render_today_view(service: SheetsService):
-    st.title("Today")
-    context = _load_context(service, include_month_entries=False, refresh_key="today_refresh")
-    if context is None:
+ENGLISH_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+DINNER_DAY_KEY = "dinner_day"
+
+
+def upcoming_dinners(rows, from_day: int, limit: int = 4):
+    """The next few dinners that someone is actually cooking."""
+    return [row for row in rows if row.day > from_day and (row.chef or row.menu)][:limit]
+
+
+def my_cooking_nights(rows, room: str):
+    return [row for row in rows if room and row.chef == room]
+
+
+def signed_up_names(row, room_name_by_label: dict[str, str]) -> list[str]:
+    """Who is eating, from the month read — no extra call per day."""
+    people = []
+    for label, count in row.signups.items():
+        if count <= 0:
+            continue
+        name = room_name_by_label.get(label) or label
+        people.append(f"{name} ({count})" if count > 1 else name)
+    return people
+
+
+def _weekday_name(worksheet_name: str, day: int) -> str:
+    parsed = parse_month_sheet_name(worksheet_name)
+    if parsed is None:
+        return ""
+    month, year = parsed
+    try:
+        return ENGLISH_WEEKDAY_NAMES[calendar.weekday(year, month, day)]
+    except ValueError:
+        return ""
+
+
+def _short_day(worksheet_name: str, day: int) -> str:
+    weekday = _weekday_name(worksheet_name, day)
+    return f"{weekday[:3]} {day}" if weekday else str(day)
+
+
+def _dinner_line(text: str, note: str, *, dim: bool = False, strong: bool = False) -> None:
+    classes = "kp-line" + (" kp-past" if dim else "") + (" kp-mine" if strong else "")
+    st.markdown(
+        f'<div class="{classes}"><span>{text}</span><span class="kp-note">{note}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _host_caption(chef: str, room_name_by_label: dict[str, str]) -> str:
+    label = str(chef).strip()
+    if not label:
+        return "nobody is cooking yet"
+    name = room_name_by_label.get(label)
+    return f"{name} is cooking" if name else f"{label} is cooking"
+
+
+def render_dinner_view(service: SheetsService):
+    sheet_name = current_month_sheet(service)
+    if sheet_name is None:
+        st.warning("No month sheets are available yet.")
         return
 
+    days = _valid_days_for_sheet(sheet_name)
+    default_day = _default_day_for_sheet(sheet_name)
+    if st.session_state.get(DINNER_DAY_KEY) not in days:
+        st.session_state.pop(DINNER_DAY_KEY, None)
+    selected_day = st.session_state.get(DINNER_DAY_KEY, default_day)
+
+    context = build_month_context(service, sheet_name, include_month_entries=False)
+    if context is None:
+        return
     if not context.signup_room_labels:
         st.warning("No rooms can sign up on this sheet.")
         return
 
-    selected_day = _day_selectbox("Day", context.selected_sheet_name, key="today_signup_day")
-    day_details = service.get_day_details(context.selected_sheet_name, selected_day)
-    selected_day_display = _day_display(context.selected_sheet_name, selected_day)
+    room = current_room(context.room_entries)
+    rows = data.day_rows(service, sheet_name)
+    row = next(
+        (candidate for candidate in rows if candidate.day == selected_day),
+        DayRow(day=selected_day, chef="", menu="", menu_description="", signed_up=0, meal_price=0.0, signups={}),
+    )
 
-    _render_meal_metrics(day_details, selected_day_display, context.room_name_by_label)
-    _render_menu_box(day_details)
+    showing_today = selected_day == default_day and is_current_month(sheet_name)
+    st.title("Tonight" if showing_today else _day_display(sheet_name, selected_day))
+    st.caption(
+        f"{_weekday_name(sheet_name, selected_day)} {_day_display(sheet_name, selected_day)}"
+        f" · {_host_caption(row.chef, context.room_name_by_label)}"
+    )
 
-    room_display = _room_display_factory(context.room_name_by_label)
-    with st.form(key="today_signup_form"):
-        account_number = st.selectbox(
-            "Room signing up",
-            context.signup_room_labels,
-            format_func=room_display,
-            key="today_signup_room",
-        )
-        num_people = st.number_input(
-            "People eating from this room",
-            min_value=0,
-            step=1,
-            key="today_signup_people",
-            value=1,
-            help="This replaces the current signup count for the room. Use 0 to cancel a signup.",
-        )
-        submitted = st.form_submit_button("Save signup")
+    _render_dinner_card(row)
+    _render_signup_controls(service, context, sheet_name, selected_day, row, room)
+    _render_other_day_picker(service, sheet_name, days, selected_day, rows, room)
 
-    if submitted:
-        try:
-            service.update_dish_signup(context.selected_sheet_name, selected_day, account_number, num_people)
-            bump_cache_version()
-            st.success(f"Saved {num_people} signed up for {room_display(account_number)}.")
-            st.rerun()
-        except ValueError as exc:
-            show_user_error(st, exc, "Could not save signup")
+    upcoming = upcoming_dinners(rows, selected_day)
+    if upcoming:
+        st.markdown("###### Coming up")
+        for entry in upcoming:
+            cook = _host_caption(entry.chef, context.room_name_by_label)
+            note = "you're in" if room and entry.signups.get(room, 0) else "—"
+            _dinner_line(f"{_short_day(sheet_name, entry.day)} · {cook}", note, strong=entry.chef == room)
 
-    signed_people = service.get_signed_up_people(context.selected_sheet_name, selected_day, context.signup_room_entries)
-    st.subheader("Signed up")
-    if signed_people:
-        for name in signed_people:
-            st.markdown(f"- {name}")
+    nights = my_cooking_nights(rows, room)
+    if nights:
+        st.markdown("###### Your nights this month")
+        for entry in nights:
+            done = is_current_month(sheet_name) and entry.day < default_day
+            note = _format_amount_dkk(entry.meal_price) if entry.meal_price else ("cooked" if done else "add menu")
+            if done:
+                _dinner_line(_short_day(sheet_name, entry.day), note, dim=True)
+                continue
+            _ledger_row(
+                title=_short_day(sheet_name, entry.day),
+                note=note,
+                key=f"mynight_{sheet_name}_{entry.day}",
+                help_text="Swap this dinner with somebody",
+                on_edit=_swap_dialog,
+                args=(service, context, sheet_name, entry.day, room, rows),
+                icon=":material/swap_horiz:",
+            )
+
+    signed_people = signed_up_names(row, context.room_name_by_label)
+    with st.expander(f"Who is eating ({row.signed_up})"):
+        if signed_people:
+            for name in signed_people:
+                st.markdown(f"- {name}")
+        else:
+            st.caption("No one is signed up yet.")
+
+    # No separate "Host dinner" screen to know about: the fields show up on the
+    # day you are cooking. On anyone else's day they stay behind one button, for
+    # when you are covering for them.
+    if room and row.chef == room:
+        st.subheader("You are cooking")
+        render_dish_form(service, context, selected_day, row)
+    elif st.button("Add the menu for this dinner", type="tertiary", key=f"dish_for_{sheet_name}_{selected_day}"):
+        _dish_dialog(service, context, selected_day, row)
+
+
+def _render_dinner_card(row) -> None:
+    price_line = _meal_price_per_person_display(row.signed_up, row.meal_price)
+    details = f"{row.signed_up} eating"
+    if price_line != "Not set":
+        details += f" · {price_line} each"
     else:
-        st.caption("No one is signed up yet.")
+        details += f" · {_format_amount_dkk(_meal_budget(row.signed_up))} expected"
+
+    with st.container(border=True):
+        st.markdown('<div class="kp-kicker">On the menu</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kp-dish">{row.menu or "No menu yet"}</div>', unsafe_allow_html=True)
+        if row.menu_description:
+            st.caption(row.menu_description)
+        st.markdown(f'<div class="kp-note">{details}</div>', unsafe_allow_html=True)
 
 
-def render_host_dinner_view(service: SheetsService):
-    st.title("Host Dinner")
-    context = _load_context(service, include_month_entries=False, refresh_key="host_dinner_refresh")
-    if context is None:
+def _signup_error_key(worksheet_name: str, day: int) -> str:
+    return f"dinner_signup_error_{worksheet_name}_{day}"
+
+
+def _render_signup_controls(service, context, sheet_name, selected_day, row, room) -> None:
+    if not room:
+        st.info("Pick your room at the top to sign up with one tap.")
+        return
+    if room not in context.signup_room_labels:
+        st.info("This account cannot sign up for dinner on this sheet.")
         return
 
-    selected_day = _day_selectbox("Dinner date", context.selected_sheet_name, key="host_dinner_day")
+    my_count = row.signups.get(room, 0)
+
+    def save(count: int) -> None:
+        # An on_click callback: Streamlit reruns by itself afterwards, and the
+        # line above the buttons is the confirmation.
+        try:
+            service.update_dish_signup(sheet_name, selected_day, room, count)
+            data.clear_dinners()
+        except ValueError as exc:
+            st.session_state[_signup_error_key(sheet_name, selected_day)] = user_error_message(
+                exc, "Could not save signup"
+            )
+
+    error = st.session_state.pop(_signup_error_key(sheet_name, selected_day), "")
+    if error:
+        st.error(error)
+
+    if my_count:
+        guests = my_count - 1
+        st.success(f"You're eating{f' with {guests} guest' + ('s' if guests > 1 else '') if guests else ''}.")
+        guests_key = f"dinner_guests_{sheet_name}_{selected_day}"
+
+        def save_guests() -> None:
+            save(1 + int(st.session_state.get(guests_key, 0)))
+
+        left, right = st.columns([2, 1], vertical_alignment="bottom")
+        left.number_input(
+            "Guests",
+            min_value=0,
+            max_value=20,
+            step=1,
+            value=guests,
+            key=guests_key,
+            help="People you are bringing. Each one pays a share, and the change saves itself.",
+            on_change=save_guests,
+        )
+        right.button(
+            "Not eating",
+            key=f"dinner_cancel_{sheet_name}_{selected_day}",
+            use_container_width=True,
+            on_click=save,
+            args=(0,),
+        )
+        return
+
+    left, right = st.columns([1, 2], vertical_alignment="bottom")
+    guests = left.number_input(
+        "Guests",
+        min_value=0,
+        max_value=20,
+        step=1,
+        value=0,
+        key=f"dinner_guests_{sheet_name}_{selected_day}",
+        help="People you are bringing. Each one pays a share.",
+    )
+    right.button(
+        "I'm eating",
+        type="primary",
+        key=f"dinner_join_{sheet_name}_{selected_day}",
+        use_container_width=True,
+        on_click=save,
+        args=(1 + guests,),
+    )
+
+
+def _pick_day(day: int) -> None:
+    st.session_state[DINNER_DAY_KEY] = day
+
+
+def _render_other_day_picker(service, sheet_name, days, selected_day, rows, room) -> None:
+    """A month you can see, rather than a dropdown of numbers.
+
+    The days somebody is cooking, the ones that are yours, and the one you are
+    looking at are all visible at once — which is the question people actually
+    bring to a day picker.
+    """
+    parsed = parse_month_sheet_name(sheet_name)
+    if parsed is None:
+        with st.expander("Another day"):
+            render_month_picker(service)
+            st.selectbox("Day", days, index=days.index(selected_day), key=DINNER_DAY_KEY)
+        return
+
+    month, year = parsed
+    chef_by_day = {row.day: row.chef for row in rows}
+    day_set = set(days)
+
+    def state_for(day: int) -> str:
+        if day not in day_set:
+            return ""
+        if day == selected_day:
+            return "here"
+        if room and chef_by_day.get(day) == room:
+            return "mine"
+        # "free" gets no fill: a day nobody has taken must not look like a day
+        # somebody has.
+        return "cook" if chef_by_day.get(day) else "free"
+
+    with st.expander("Another day"):
+        render_grid(
+            key=f"dinnerday_{sheet_name}",
+            year=year,
+            month=month,
+            day_state=state_for,
+            on_click=_pick_day,
+            args_for=lambda day: (day,),
+        )
+        st.markdown(
+            "<div class='kpal-legend'>"
+            "<span><i class='kpal-sw kpal-sw-mine'></i>your night</span>"
+            "<span><i class='kpal-sw kpal-sw-can'></i>someone is cooking</span>"
+            "<span><i class='kpal-sw kpal-sw-off'></i>nobody yet</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        render_month_picker(service)
+
+
+@st.dialog("Swap this dinner")
+def _swap_dialog(service: SheetsService, context, sheet_name: str, day: int, room: str, rows) -> None:
+    """Bytte madklub: give a night away, or trade it for one of theirs.
+
+    The chef is one cell per day, so both are the same write. Nobody is asked to
+    consent — this is a house, not a workflow engine — but both people end up in
+    the Log, which is what an argument about it would need.
+    """
+    others = [
+        entry
+        for entry in context.signup_room_entries
+        if entry.label != room and is_occupied_account(entry.label, entry.name)
+    ]
+    if not others:
+        st.caption("There is nobody else on this sheet to swap with.")
+        return
+
+    st.markdown(f"**{_weekday_name(sheet_name, day)} {_day_display(sheet_name, day)}** is yours.")
+    taker = st.selectbox(
+        "Who takes it?",
+        others,
+        format_func=lambda entry: entry.name or entry.label,
+        key=f"swap_taker_{sheet_name}_{day}",
+    )
+
+    theirs = [entry.day for entry in rows if entry.chef == taker.label and entry.day != day]
+    other_day = None
+    if theirs:
+        choice = st.selectbox(
+            "And you take",
+            [None] + theirs,
+            format_func=lambda value: (
+                "nothing — they just take mine" if value is None else _short_day(sheet_name, value)
+            ),
+            key=f"swap_theirs_{sheet_name}_{day}",
+        )
+        other_day = choice
+    else:
+        st.caption(f"{taker.name or taker.label} is not cooking any other night this month.")
+
+    if not st.button("Swap", type="primary", use_container_width=True, key=f"swap_go_{sheet_name}_{day}"):
+        return
+    try:
+        service.swap_dinner(sheet_name, day, room, taker.label, other_day=other_day, by=room)
+    except ValueError as exc:
+        show_user_error(st, exc, "Could not swap the dinner")
+        return
+    data.clear_dinners()
+    st.toast(
+        f"{taker.name or taker.label} has the {day}{_ordinal(day)}"
+        + (f", and you have the {other_day}{_ordinal(other_day)}." if other_day else ".")
+    )
+    st.rerun()
+
+
+@st.dialog("Menu and cost")
+def _dish_dialog(service, context, selected_day, day_details) -> None:
+    render_dish_form(service, context, selected_day, day_details)
+
+
+def render_dish_form(service: SheetsService, context: DayToDayContext, selected_day: int, day_details):
+    """The host's own fields. Takes anything with menu, menu_description and meal_price."""
     if st.session_state.pop(_meal_details_saved_key(context.selected_sheet_name, selected_day), False):
         st.success("Dinner details have been updated.")
-
-    day_details = service.get_day_details(context.selected_sheet_name, selected_day)
-    selected_day_display = _day_display(context.selected_sheet_name, selected_day)
-    _render_meal_metrics(day_details, selected_day_display, context.room_name_by_label)
 
     with st.form(key=f"dish_form_{context.selected_sheet_name}_{selected_day}"):
         dish_name = st.text_input(
@@ -401,7 +683,7 @@ def render_host_dinner_view(service: SheetsService):
             help="Leave blank if the final cost is not known yet.",
             key=f"dish_price_{context.selected_sheet_name}_{selected_day}",
         )
-        submitted = st.form_submit_button("Save dinner details")
+        submitted = st.form_submit_button("Save dinner details", type="primary", use_container_width=True)
 
     if submitted:
         if not dish_name.strip() and not menu_description.strip() and not str(meal_price or "").strip():
@@ -415,62 +697,651 @@ def render_host_dinner_view(service: SheetsService):
                 meal_price,
                 menu_description,
             )
-            bump_cache_version()
+            data.clear_dinners()
             st.session_state[_meal_details_saved_key(context.selected_sheet_name, selected_day)] = True
             st.rerun()
         except ValueError as exc:
             show_user_error(st, exc, "Could not save dinner details")
 
 
-def render_drinks_purchases_view(service: SheetsService):
-    st.title("Record Drinks & Purchases")
-    context = _load_context(service, include_month_entries=True, refresh_key="drinks_purchases_refresh")
+STATEMENT_LABELS = {
+    "carried_in": "Carried in from last month",
+    "dinners": "Dinners eaten",
+    "cooked": "Dinners you cooked",
+    "drinks": "Drinks",
+    "purchases": "Shared purchases you paid for",
+    "payments": "Paid in or out",
+    "dues": "Monthly dues",
+    "interest": "Interest",
+}
+STATEMENT_ORDER = ["carried_in", "dinners", "cooked", "drinks", "purchases", "payments", "dues", "interest"]
+
+
+def _balance_sentence(balance: float) -> str:
+    if balance < 0:
+        return f"You owe the kitchen fund {_format_amount_dkk(abs(balance))}."
+    if balance > 0:
+        return "The kitchen fund is holding this for you."
+    return "You are square with the kitchen fund."
+
+
+def statement_detail(key: str, *, day_rows, room: str, drinks, purchases) -> str:
+    """The human count behind a line, when the app can know it."""
+    if key == "dinners":
+        meals = sum(row.signups.get(room, 0) for row in day_rows)
+        return f"{meals} meal{'s' if meals != 1 else ''}"
+    if key == "cooked":
+        nights = len(my_cooking_nights(day_rows, room))
+        return f"{nights} night{'s' if nights != 1 else ''}"
+    if key == "drinks":
+        entry = next((item for item in drinks if item.room == room), None)
+        if entry is None:
+            return ""
+        parts = []
+        if entry.beer_soda:
+            parts.append(f"{entry.beer_soda} beer/soda")
+        if entry.wine:
+            parts.append(f"{entry.wine} wine")
+        return ", ".join(parts)
+    if key == "purchases":
+        mine = [item for item in purchases if item.room == room]
+        return f"{len(mine)} purchase{'s' if len(mine) != 1 else ''}" if mine else ""
+    return ""
+
+
+def _render_statement(statement, *, day_rows, room, drinks, purchases) -> None:
+    with st.container(border=True):
+        st.markdown('<div class="kp-kicker">Your balance</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kp-money">{_format_amount_dkk(statement.balance)}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kp-note">{_balance_sentence(statement.balance)}</div>', unsafe_allow_html=True)
+
+    lines = [(key, statement.components.get(key, 0.0)) for key in STATEMENT_ORDER]
+    lines = [(key, amount) for key, amount in lines if amount]
+    if not lines:
+        st.caption("Nothing has happened on your account this month yet.")
+        return
+
+    st.markdown("###### This month")
+    for key, amount in lines:
+        detail = statement_detail(key, day_rows=day_rows, room=room, drinks=drinks, purchases=purchases)
+        text = STATEMENT_LABELS[key] + (f" · {detail}" if detail else "")
+        sign = "+" if amount > 0 else "−"
+        _dinner_line(text, f"{sign}{_format_amount_dkk(abs(amount))}")
+
+
+@st.dialog("Add drinks")
+def _drinks_dialog(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    add_drinks_form(service, context, room)
+
+
+@st.dialog("Add a shared purchase")
+def _purchase_dialog(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    add_purchase_form(service, context, room)
+
+
+@st.dialog("Kitchen fund payment")
+def _payment_dialog(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    add_payment_form(service, context, room)
+
+
+@st.dialog("Add a shared cost")
+def _andet_dialog(service: SheetsService, context: DayToDayContext, room: str, entry=None) -> None:
+    add_andet_form(service, context, room, entry)
+
+
+def _who_paid_selectbox(context: DayToDayContext, entry_room: str, key: str) -> str:
+    """House can move a row to the right person; Me never needs to."""
+    labels = list(context.room_labels)
+    if entry_room and entry_room not in labels:
+        labels.append(entry_room)
+    return st.selectbox(
+        "Who paid",
+        labels,
+        index=labels.index(entry_room) if entry_room in labels else 0,
+        format_func=_room_display_factory(context.room_name_by_label),
+        key=key,
+    )
+
+
+@st.dialog("Edit purchase")
+def _edit_purchase_dialog(
+    service: SheetsService, context: DayToDayContext, entry, allow_reassign: bool = False
+) -> None:
+    with st.form(key=f"edit_purchase_form_{entry.row_number}"):
+        purchase_room = (
+            _who_paid_selectbox(context, entry.room, f"edit_purchase_room_{entry.row_number}")
+            if allow_reassign
+            else entry.room
+        )
+        item = st.text_input(
+            "What was bought?", value=entry.item, key=f"edit_purchase_item_{entry.row_number}"
+        )
+        purchase_date = st.date_input(
+            "Date",
+            value=_purchase_date_for_edit(entry.date, context.selected_sheet_name),
+            key=f"edit_purchase_date_{entry.row_number}",
+        )
+        amount = st.number_input(
+            "Total price (negative for refunds)",
+            value=float(entry.amount),
+            step=0.01,
+            key=f"edit_purchase_cost_{entry.row_number}",
+        )
+        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+
+    removed = _delete_control("purchase", context, entry.row_number, "purchase")
+
+    if save:
+        if not str(item).strip():
+            st.error("Add what was bought before saving.")
+            return
+        if amount == 0:
+            st.error("Add a non-zero price before saving (negative for refunds).")
+            return
+        try:
+            service.update_purchase(
+                context.selected_sheet_name, entry.row_number, purchase_room, purchase_date, item, amount
+            )
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not save the purchase")
+            return
+    elif removed:
+        try:
+            service.delete_purchase(context.selected_sheet_name, entry.row_number)
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not delete the purchase")
+            return
+    else:
+        return
+
+    data.clear_money()
+    st.rerun()
+
+
+@st.dialog("Edit payment")
+def _edit_payment_dialog(
+    service: SheetsService, context: DayToDayContext, entry, allow_reassign: bool = False
+) -> None:
+    types = ["Payment to kitchen fund", "Payout from kitchen fund"]
+    if entry.transaction_type and entry.transaction_type not in types:
+        types.append(entry.transaction_type)
+    with st.form(key=f"edit_payment_form_{entry.row_number}"):
+        payment_room = (
+            _who_paid_selectbox(context, entry.room, f"edit_tx_room_{entry.row_number}")
+            if allow_reassign
+            else entry.room
+        )
+        payment_type = st.selectbox(
+            "Payment type",
+            types,
+            index=types.index(entry.transaction_type) if entry.transaction_type in types else 0,
+            key=f"edit_tx_type_{entry.row_number}",
+        )
+        amount = st.number_input(
+            "Amount (DKK)",
+            value=abs(float(entry.amount)),
+            min_value=0.0,
+            step=0.01,
+            key=f"edit_tx_amount_{entry.row_number}",
+        )
+        payment_date = st.date_input(
+            "Date",
+            value=_transaction_date_for_edit(entry.date, context.selected_sheet_name),
+            key=f"edit_tx_date_{entry.row_number}",
+        )
+        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+
+    removed = _delete_control("payment", context, entry.row_number, "payment")
+
+    if save:
+        if amount <= 0:
+            st.error("Add an amount greater than 0 before saving.")
+            return
+        try:
+            service.update_transaction(
+                context.selected_sheet_name, entry.row_number, payment_room, payment_type, amount, payment_date
+            )
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not save the payment")
+            return
+    elif removed:
+        try:
+            service.delete_transaction(context.selected_sheet_name, entry.row_number)
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not delete the payment")
+            return
+    else:
+        return
+
+    data.clear_money()
+    st.rerun()
+
+
+@st.dialog("Correct drinks")
+def _edit_drinks_dialog(service: SheetsService, context: DayToDayContext, entry) -> None:
+    room_display = _room_display_factory(context.room_name_by_label)
+    st.caption(f"The month's running total for {room_display(entry.room)}. Type what it should be.")
+    with st.form(key=f"edit_drinks_form_{entry.row_number}"):
+        beer = st.number_input(
+            "Beers or sodas",
+            min_value=0,
+            step=1,
+            value=int(entry.beer_soda),
+            key=f"edit_drinks_beer_{entry.row_number}",
+        )
+        wine = st.number_input(
+            "Bottles of wine",
+            min_value=0,
+            step=1,
+            value=int(entry.wine),
+            key=f"edit_drinks_wine_{entry.row_number}",
+        )
+        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+
+    if not save:
+        return
+    try:
+        service.update_drinks(context.selected_sheet_name, entry.row_number, int(beer), int(wine))
+    except ValueError as exc:
+        show_user_error(st, exc, f"Could not save the drinks for {room_display(entry.room)}")
+        return
+
+    data.clear_money()
+    st.rerun()
+
+
+def _is_payout(transaction_type: str) -> bool:
+    text = str(transaction_type).lower()
+    return "payout" in text or "udbetal" in text
+
+
+def _ledger_row(
+    *,
+    title: str,
+    note: str,
+    key: str,
+    help_text: str,
+    on_edit,
+    args,
+    subtitle: str = "",
+    mine: bool = False,
+    icon: str = ":material/edit:",
+) -> None:
+    """One money row: what it was, whose it is, and the pencil that fixes it.
+
+    A horizontal container, not columns: columns stack on a phone and would
+    drop the pencil onto its own line under every row.
+    """
+    with st.container(horizontal=True, vertical_alignment="center", key=f"kpalrow_{key}"):
+        classes = "kp-line" + (" kp-mine" if mine else "")
+        sub = f'<span class="kp-sub">{_esc(subtitle)}</span>' if subtitle else ""
+        # A shopping list typed into one cell can run for lines; the dialog has
+        # the whole of it, so the row stops at two.
+        st.markdown(
+            f'<div class="{classes}"><span><span class="kp-clamp">{_esc(title)}</span>{sub}</span>'
+            f'<span class="kp-note">{_esc(note)}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.button(
+            "",
+            icon=icon,
+            key=f"edit_{key}",
+            help=help_text,
+            type="tertiary",
+            on_click=on_edit,
+            args=args,
+        )
+
+
+def _my_row(text: str, note: str, *, key: str, help_text: str, on_edit, args) -> None:
+    _ledger_row(title=text, note=note, key=f"my_{key}", help_text=help_text, on_edit=on_edit, args=args)
+
+
+def _ledger_header(kicker: str, headline: str, caption: str = "") -> None:
+    """Every ledger opens with its one number, then the fine print."""
+    st.markdown(
+        f'<div class="kp-kicker">{_esc(kicker)}</div>'
+        f'<div class="kp-money kp-small">{_esc(headline)}</div>',
+        unsafe_allow_html=True,
+    )
+    if caption:
+        st.caption(caption)
+
+
+def _arm_delete(state_key: str, row_number: int) -> None:
+    st.session_state[state_key] = row_number
+
+
+def _disarm_delete(state_key: str) -> None:
+    st.session_state.pop(state_key, None)
+
+
+def _delete_control(kind: str, context: DayToDayContext, row_number: int, noun: str) -> bool:
+    """A two-step delete, because these rows are somebody's money.
+
+    The arming and cancelling happen in on_click callbacks: st.rerun() inside a
+    dialog closes it, and a callback has already run by the time the dialog
+    redraws, so the confirmation swaps in without one.
+    """
+    state_key = _delete_confirmation_key(kind, context.selected_sheet_name)
+    if st.session_state.get(state_key) != row_number:
+        st.button(
+            f"Delete this {noun}",
+            key=f"arm_delete_{kind}_{row_number}",
+            use_container_width=True,
+            on_click=_arm_delete,
+            args=(state_key, row_number),
+        )
+        return False
+
+    st.warning(f"Delete this {noun} for good?")
+    with st.container(horizontal=True):
+        confirmed = st.button(
+            "Yes, delete",
+            key=f"confirm_delete_{kind}_{row_number}",
+            type="primary",
+            use_container_width=True,
+        )
+        st.button(
+            "Keep it",
+            key=f"cancel_delete_{kind}_{row_number}",
+            use_container_width=True,
+            on_click=_disarm_delete,
+            args=(state_key,),
+        )
+    if confirmed:
+        _disarm_delete(state_key)
+    return confirmed
+
+
+def _render_my_rows(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    """Your own purchases, payments and shared costs — everyone else's live under House."""
+    purchases = [entry for entry in context.month_entries.purchases if entry.room == room]
+    payments = [entry for entry in context.month_entries.transactions if entry.room == room]
+    shared = [entry for entry in data.andet_rows(service, context.selected_sheet_name) if entry.payer == room]
+    if not purchases and not payments and not shared:
+        return
+
+    st.markdown("###### Yours this month")
+    for entry in purchases:
+        _my_row(
+            f"{entry.item or 'Purchase'} · {entry.date}",
+            f"+{_format_amount_dkk(entry.amount)}",
+            key=f"purchase_{entry.row_number}",
+            help_text="Edit or delete this purchase",
+            on_edit=_edit_purchase_dialog,
+            args=(service, context, entry),
+        )
+    for entry in payments:
+        _my_row(
+            f"{entry.transaction_type} · {entry.date}",
+            _format_amount_dkk(entry.amount),
+            key=f"payment_{entry.row_number}",
+            help_text="Edit or delete this payment",
+            on_edit=_edit_payment_dialog,
+            args=(service, context, entry),
+        )
+    for entry in shared:
+        _my_row(
+            f"{entry.description or 'Shared cost'} · {entry.head_count} "
+            f"{'person' if entry.head_count == 1 else 'people'}",
+            f"+{_format_amount_dkk(entry.amount)}",
+            key=f"andet_{entry.row_number}",
+            help_text="Edit or delete this shared cost",
+            on_edit=_andet_dialog,
+            args=(service, context, room, entry),
+        )
+
+
+def render_me_view(service: SheetsService):
+    sheet_name = current_month_sheet(service)
+    if sheet_name is None:
+        st.warning("No month sheets are available yet.")
+        return
+
+    context = build_month_context(service, sheet_name, include_month_entries=True)
     if context is None or context.month_entries is None:
         return
 
-    drinks_tab, purchases_tab = st.tabs(["Drinks", "Shared purchases"])
-    with drinks_tab:
-        _render_drinks_section(service, context)
-    with purchases_tab:
-        _render_purchases_section(service, context)
+    room = current_room(context.room_entries)
+    statement = data.account_statement(service, sheet_name, room) if room else None
+    if statement is None:
+        st.info("Pick your room at the top to see what you owe.")
+    else:
+        _render_statement(
+            statement,
+            day_rows=data.day_rows(service, sheet_name),
+            room=room,
+            drinks=context.month_entries.drinks,
+            purchases=context.month_entries.purchases,
+        )
+
+    if room:
+        with st.container(horizontal=True, key="kpaladd"):
+            if st.button("Drinks", icon=":material/local_bar:", use_container_width=True):
+                _drinks_dialog(service, context, room)
+            if st.button("Purchase", icon=":material/receipt_long:", use_container_width=True):
+                _purchase_dialog(service, context, room)
+            if st.button("Pay in", icon=":material/savings:", use_container_width=True):
+                _payment_dialog(service, context, room)
+            if st.button("Shared cost", icon=":material/group:", use_container_width=True):
+                _andet_dialog(service, context, room)
+
+        _render_my_rows(service, context, room)
+
+    with st.expander("Another month"):
+        render_month_picker(service)
 
 
-def _render_drinks_section(service: SheetsService, context: DayToDayContext):
-    st.header("Drinks")
+def people_labels(room_entries, *, signup_only: bool = False) -> list[str]:
+    """Accounts that are a person right now.
+
+    Empty FL slots are placeholders, not housemates, so they are never offered.
+    """
+    return [
+        entry.label
+        for entry in room_entries
+        if is_occupied_account(entry.label, entry.name)
+        and (entry.signup_column is not None or not signup_only)
+    ]
+
+
+def resident_labels(room_entries, *, signup_only: bool = False) -> list[str]:
+    """"Everyone in the house": the numbered rooms 346-360 that someone lives in."""
+    return [
+        entry.label
+        for entry in room_entries
+        if is_room_label(entry.label)
+        and str(entry.name or "").strip()
+        and (entry.signup_column is not None or not signup_only)
+    ]
+
+
+def _who_is_this_for(context: DayToDayContext, key: str, room: str) -> str:
+    """Acts as you unless you say otherwise — people do cover for each other."""
     room_display = _room_display_factory(context.room_name_by_label)
-    with st.form(key="drinks_form"):
-        room_number = st.selectbox("Room", context.room_labels, format_func=room_display, key="drinks_room")
-        beer_quantity = st.number_input("Beers or sodas to add", min_value=0, step=1, key="drinks_beer")
-        wine_quantity = st.number_input("Wine bottles to add", min_value=0, step=1, key="drinks_wine")
-        st.caption("These numbers are added to the room's current drink totals.")
-        submitted = st.form_submit_button("Add drinks")
+    labels = people_labels(context.room_entries)
+    if room and not st.toggle("For someone else", key=f"{key}_for_other"):
+        st.caption(f"For you — {room_display(room)}")
+        return room
+    return st.selectbox(
+        "Who",
+        labels,
+        format_func=room_display,
+        index=default_index(labels, room),
+        key=f"{key}_who",
+    )
 
-    if submitted:
-        if beer_quantity == 0 and wine_quantity == 0:
-            st.error("Add at least one drink before saving.")
+
+def add_andet_form(service: SheetsService, context: DayToDayContext, room: str, entry=None) -> None:
+    """A cost with no date: what it was, what it cost, and who was in on it.
+
+    The sheet does the splitting — everyone marked here is charged one share and
+    whoever paid is credited the whole amount.
+    """
+    room_display = _room_display_factory(context.room_name_by_label)
+    labels = people_labels(context.room_entries, signup_only=True)
+    everyone_labels = resident_labels(context.room_entries, signup_only=True)
+    suffix = f"_{entry.row_number}" if entry is not None else ""
+
+    payer = _who_is_this_for(context, f"andet{suffix}", entry.payer if entry is not None else room)
+    everyone = st.checkbox(
+        "Everyone in the house",
+        value=bool(entry is not None and set(everyone_labels) <= set(entry.participants)),
+        key=f"andet_everyone{suffix}",
+        help="For birthdays: every room pays a share, whether they were there or not.",
+    )
+    default_people = list(entry.participants) if entry is not None else ([room] if room in labels else [])
+    people = everyone_labels if everyone else st.multiselect(
+        "Who was in on it",
+        labels,
+        default=[label for label in default_people if label in labels],
+        format_func=room_display,
+        key=f"andet_people{suffix}",
+    )
+
+    with st.form(key=f"andet_form{suffix}"):
+        description = st.text_input(
+            "What was it?",
+            value=entry.description if entry is not None else "",
+            placeholder="e.g. birthday cake, Sunday brunch",
+        )
+        amount = st.number_input(
+            "Total cost (DKK)",
+            min_value=0.0,
+            step=0.01,
+            value=float(entry.amount) if entry is not None else 0.0,
+        )
+        if people:
+            st.caption(
+                f"{len(people)} {'person' if len(people) == 1 else 'people'}"
+                f" · {_format_amount_dkk(amount / len(people))} each"
+            )
+        save = st.form_submit_button("Save shared cost", type="primary", use_container_width=True)
+        remove = st.form_submit_button("Delete this cost", use_container_width=True) if entry is not None else False
+
+    if save:
+        if amount <= 0:
+            st.error("Add the total cost before saving.")
             return
         try:
-            drink_entry = next((entry for entry in context.month_entries.drinks if entry.room == room_number), None)
-            if drink_entry is None:
-                new_beer, new_wine = service.add_drinks(
-                    context.selected_sheet_name, room_number, beer_quantity, wine_quantity
-                )
-            else:
-                new_beer = drink_entry.beer_soda + beer_quantity
-                new_wine = drink_entry.wine + wine_quantity
-                service.update_drinks(context.selected_sheet_name, drink_entry.row_number, new_beer, new_wine)
-            _invalidate_month_entries(context.selected_sheet_name)
-            st.success(f"Updated totals for {room_display(room_number)}: {new_beer} beers/sodas and {new_wine} wines.")
-            st.rerun()
+            service.save_andet(
+                context.selected_sheet_name,
+                payer=payer,
+                description=description,
+                amount=amount,
+                participants=list(people),
+                room_entries=context.room_entries,
+                row_number=entry.row_number if entry is not None else None,
+            )
         except ValueError as exc:
-            show_user_error(st, exc, "Could not update drinks")
-
-    st.subheader("Drink totals")
-    drink_entries = context.month_entries.drinks
-    if drink_entries:
-        st.table(_table_rows(drink_entries, exclude_keys=["row_number"]))
+            show_user_error(st, exc, "Could not save the shared cost")
+            return
+    elif remove:
+        try:
+            service.clear_andet(context.selected_sheet_name, entry.row_number, context.room_entries)
+        except ValueError as exc:
+            show_user_error(st, exc, "Could not delete the shared cost")
+            return
     else:
-        st.caption("No drink rows found.")
+        return
+
+    data.clear_money()
+    st.rerun()
+
+
+def render_andet_list(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    rows = data.andet_rows(service, context.selected_sheet_name)
+    if not rows:
+        st.caption("No shared costs this month.")
+        return
+
+    room_display = _room_display_factory(context.room_name_by_label)
+    st.caption(f"{len(rows)} of {ANDET_ROW_CAPACITY} shared cost rows used this month.")
+    for entry in rows:
+        mine = room and room in entry.participants
+        note = f"{_format_amount_dkk(entry.share)} each" if entry.head_count else "—"
+        st.markdown(
+            f'<div class="kp-line{" kp-mine" if mine else ""}">'
+            f"<span>{entry.description or 'Shared cost'} · {room_display(entry.payer)} paid "
+            f"{_format_amount_dkk(entry.amount)} · {entry.head_count} "
+            f"{'person' if entry.head_count == 1 else 'people'}</span>"
+            f'<span class="kp-note">{note}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def add_drinks_form(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    room_display = _room_display_factory(context.room_name_by_label)
+    target_room = _who_is_this_for(context, "drinks", room)
+    with st.form(key="drinks_form"):
+        beer_quantity = st.number_input("Beers or sodas", min_value=0, step=1, key="drinks_beer")
+        wine_quantity = st.number_input("Bottles of wine", min_value=0, step=1, key="drinks_wine")
+        st.caption("These are added to the running total for the month.")
+        submitted = st.form_submit_button("Add drinks", type="primary", use_container_width=True)
+
+    if not submitted:
+        return
+    if beer_quantity == 0 and wine_quantity == 0:
+        st.error("Add at least one drink before saving.")
+        return
+    try:
+        drink_entry = next((entry for entry in context.month_entries.drinks if entry.room == target_room), None)
+        if drink_entry is None:
+            service.add_drinks(context.selected_sheet_name, target_room, beer_quantity, wine_quantity)
+        else:
+            service.update_drinks(
+                context.selected_sheet_name,
+                drink_entry.row_number,
+                drink_entry.beer_soda + beer_quantity,
+                drink_entry.wine + wine_quantity,
+            )
+        data.clear_money()
+        st.rerun()
+    except ValueError as exc:
+        show_user_error(st, exc, f"Could not add drinks for {room_display(target_room)}")
+
+
+def _drink_summary(beer: int, wine: int) -> str:
+    parts = []
+    if beer:
+        parts.append(f"{beer} beer/soda")
+    if wine:
+        parts.append(f"{wine} wine")
+    return " · ".join(parts) or "None"
+
+
+def render_drink_totals(service: SheetsService, context: DayToDayContext, room: str = "") -> None:
+    """Everyone's drink tally for the month, and the one way to correct it.
+
+    Adding drinks is a Me action; this is the register, so the tally is the
+    whole row and the pencil sets it rather than adding to it.
+    """
+    entries = [entry for entry in context.month_entries.drinks if entry.beer_soda or entry.wine]
+    if not entries:
+        _ledger_header("Drinks this month", "None yet")
+        st.caption("Drinks are added from Me.")
+        return
+
+    beers = sum(int(entry.beer_soda) for entry in entries)
+    wines = sum(int(entry.wine) for entry in entries)
+    _ledger_header(
+        "Drinks this month",
+        _drink_summary(beers, wines),
+        f"{len(entries)} {'person has' if len(entries) == 1 else 'people have'} drinks on the sheet.",
+    )
+
+    for entry in sorted(entries, key=lambda item: int(item.beer_soda) + int(item.wine), reverse=True):
+        _ledger_row(
+            title=entry.name or entry.room,
+            subtitle=entry.room if entry.name else "",
+            note=_drink_summary(int(entry.beer_soda), int(entry.wine)),
+            key=f"drinks_{entry.row_number}",
+            help_text="Correct this tally",
+            on_edit=_edit_drinks_dialog,
+            args=(service, context, entry),
+            mine=entry.room == room,
+        )
 
 
 def _table_usage_caption(used: int, capacity: int, noun: str) -> str:
@@ -484,17 +1355,15 @@ def _table_usage_caption(used: int, capacity: int, noun: str) -> str:
     return f"{used} of {capacity} {noun} rows used this month."
 
 
-def _render_purchases_section(service: SheetsService, context: DayToDayContext):
-    st.header("Shared kitchen purchase")
-    room_display = _room_display_factory(context.room_name_by_label)
+def add_purchase_form(service: SheetsService, context: DayToDayContext, room: str):
+    purchase_room = _who_is_this_for(context, "purchase", room)
     with st.form(key="purchase_form"):
-        purchase_room = st.selectbox("Room paid", context.room_labels, format_func=room_display, key="purchase_room")
         purchase_item = st.text_input("What was bought?", key="purchase_item")
         purchase_date = st.date_input("Date", key="purchase_date")
         purchase_cost = st.number_input(
             "Total price (negative for refunds like pant)", step=0.01, key="purchase_cost"
         )
-        submitted = st.form_submit_button("Register purchase")
+        submitted = st.form_submit_button("Save purchase", type="primary", use_container_width=True)
 
     if submitted:
         if not purchase_item.strip():
@@ -526,132 +1395,53 @@ def _render_purchases_section(service: SheetsService, context: DayToDayContext):
                     purchase_item,
                     purchase_cost,
                 )
-            _invalidate_month_entries(context.selected_sheet_name)
-            st.success(f"Registered purchase: {purchase_item} ({_format_amount_dkk(purchase_cost)}).")
+            data.clear_money()
             st.rerun()
         except ValueError as exc:
             show_user_error(st, exc, "Could not register purchase")
 
-    st.subheader("Registered purchases")
-    purchase_entries = context.month_entries.purchases
-    st.caption(_table_usage_caption(len(purchase_entries), PURCHASE_ROW_CAPACITY, "purchase"))
-    if not purchase_entries:
-        st.caption("No purchases yet.")
-        return
 
-    st.table(_table_rows(purchase_entries, amount_keys=["amount"], exclude_keys=["row_number"]))
-    st.subheader("Edit a purchase")
-    selected_purchase = st.selectbox(
-        "Purchase",
-        purchase_entries,
-        format_func=lambda entry: f"{entry.date} · {entry.room} · {entry.item} · {_format_amount_dkk(entry.amount)}",
-        key="edit_purchase_entry",
+def render_purchase_ledger(service: SheetsService, context: DayToDayContext, room: str = "") -> None:
+    """Everyone's purchases, newest first, each one a tap away from a fix."""
+    entries = context.month_entries.purchases
+    total = sum(float(entry.amount) for entry in entries)
+    _ledger_header(
+        "Purchases this month",
+        _format_amount_dkk(total) if entries else "None yet",
+        f"{len(entries)} {'purchase' if len(entries) == 1 else 'purchases'}, "
+        "each one credited to whoever paid.",
     )
-
-    edit_purchase_room_labels = list(context.room_labels)
-    if selected_purchase.room and selected_purchase.room not in edit_purchase_room_labels:
-        edit_purchase_room_labels.append(selected_purchase.room)
-
-    with st.form(key=f"edit_purchase_form_{selected_purchase.row_number}"):
-        edited_purchase_room = st.selectbox(
-            "Room paid",
-            edit_purchase_room_labels,
-            index=edit_purchase_room_labels.index(selected_purchase.room)
-            if selected_purchase.room in edit_purchase_room_labels
-            else 0,
-            format_func=room_display,
-            key=f"edit_purchase_room_{selected_purchase.row_number}",
-        )
-        edited_purchase_item = st.text_input(
-            "What was bought?",
-            value=selected_purchase.item,
-            key=f"edit_purchase_item_{selected_purchase.row_number}",
-        )
-        edited_purchase_date = st.date_input(
-            "Date",
-            value=_purchase_date_for_edit(selected_purchase.date, context.selected_sheet_name),
-            key=f"edit_purchase_date_{selected_purchase.row_number}",
-        )
-        edited_purchase_cost = st.number_input(
-            "Total price (negative for refunds like pant)",
-            step=0.01,
-            value=float(selected_purchase.amount),
-            key=f"edit_purchase_cost_{selected_purchase.row_number}",
-        )
-        save_purchase = st.form_submit_button("Save purchase")
-        delete_purchase = st.form_submit_button("Delete purchase")
-
-    if save_purchase:
-        if not edited_purchase_item.strip():
-            st.error("Add what was bought before saving.")
-            return
-        if edited_purchase_cost == 0:
-            st.error("Add a non-zero price before saving (negative for refunds).")
-            return
-        try:
-            st.session_state.pop(_delete_confirmation_key("purchase", context.selected_sheet_name), None)
-            service.update_purchase(
-                context.selected_sheet_name,
-                selected_purchase.row_number,
-                edited_purchase_room,
-                edited_purchase_date,
-                edited_purchase_item,
-                edited_purchase_cost,
-            )
-            _invalidate_month_entries(context.selected_sheet_name)
-            st.success("Purchase updated.")
-            st.rerun()
-        except ValueError as exc:
-            show_user_error(st, exc, "Could not update purchase")
-
-    if delete_purchase:
-        st.session_state[_delete_confirmation_key("purchase", context.selected_sheet_name)] = selected_purchase.row_number
-
-    if st.session_state.get(_delete_confirmation_key("purchase", context.selected_sheet_name)) == selected_purchase.row_number:
-        st.warning("Are you sure you want to delete this purchase?")
-        confirm_col, cancel_col = st.columns(2)
-        if confirm_col.button(
-            "Yes, delete purchase",
-            key=f"confirm_delete_purchase_{selected_purchase.row_number}",
-        ):
-            try:
-                service.delete_purchase(context.selected_sheet_name, selected_purchase.row_number)
-                st.session_state.pop(_delete_confirmation_key("purchase", context.selected_sheet_name), None)
-                _invalidate_month_entries(context.selected_sheet_name)
-                st.success("Purchase deleted.")
-                st.rerun()
-            except ValueError as exc:
-                show_user_error(st, exc, "Could not delete purchase")
-        if cancel_col.button("Cancel", key=f"cancel_delete_purchase_{selected_purchase.row_number}"):
-            st.session_state.pop(_delete_confirmation_key("purchase", context.selected_sheet_name), None)
-            st.rerun()
-
-
-def render_kitchen_fund_view(service: SheetsService, embedded: bool = False):
-    if embedded:
-        st.header("Kitchen fund payments")
-    else:
-        st.title("Kitchen Fund Payments")
-    context = _load_context(service, include_month_entries=True, refresh_key="kitchen_fund_refresh")
-    if context is None or context.month_entries is None:
+    if not entries:
+        st.caption("Shared purchases are added from Me.")
         return
-    _render_transfers_section(service, context, show_header=not embedded)
+
+    for entry in _newest_first(entries, context.selected_sheet_name):
+        _ledger_row(
+            title=entry.item or "Purchase",
+            subtitle=f"{_person_caption(entry.room, context.room_name_by_label)} · "
+            f"{_short_date(entry.date, context.selected_sheet_name)}",
+            note=_signed_amount(float(entry.amount)),
+            key=f"purchase_{entry.row_number}",
+            help_text="Edit or delete this purchase",
+            on_edit=_edit_purchase_dialog,
+            args=(service, context, entry, True),
+            mine=entry.room == room,
+        )
+
+    st.caption(_table_usage_caption(len(entries), PURCHASE_ROW_CAPACITY, "purchase"))
 
 
-def _render_transfers_section(service: SheetsService, context: DayToDayContext, show_header: bool = True):
-    if show_header:
-        st.header("Kitchen fund payments")
-    room_display = _room_display_factory(context.room_name_by_label)
+def add_payment_form(service: SheetsService, context: DayToDayContext, room: str):
+    transaction_room = _who_is_this_for(context, "payment", room)
     with st.form(key="transaction_form"):
-        transaction_room = st.selectbox("Room", context.room_labels, format_func=room_display, key="tx_room")
         transaction_type = st.selectbox(
             "Payment type",
             ["Payment to kitchen fund", "Payout from kitchen fund"],
             key="tx_type",
         )
-        transaction_amount = st.number_input("Amount", min_value=0.0, step=0.01, key="tx_amount")
+        transaction_amount = st.number_input("Amount (DKK)", min_value=0.0, step=0.01, key="tx_amount")
         transaction_date = st.date_input("Date", value=datetime.now(), key="tx_date")
-        submitted = st.form_submit_button("Register payment")
+        submitted = st.form_submit_button("Save payment", type="primary", use_container_width=True)
 
     if submitted:
         if transaction_amount <= 0:
@@ -676,113 +1466,37 @@ def _render_transfers_section(service: SheetsService, context: DayToDayContext, 
                     transaction_amount,
                     transaction_date,
                 )
-            _invalidate_month_entries(context.selected_sheet_name)
-            st.success("Kitchen fund payment registered.")
+            data.clear_money()
             st.rerun()
         except ValueError as exc:
             show_user_error(st, exc, "Could not register kitchen fund payment")
 
-    st.subheader("Registered kitchen fund payments")
-    transaction_entries = context.month_entries.transactions
-    st.caption(_table_usage_caption(len(transaction_entries), TRANSACTION_ROW_CAPACITY, "payment"))
-    if not transaction_entries:
-        st.caption("No payments yet.")
+
+def render_payment_ledger(service: SheetsService, context: DayToDayContext, room: str = "") -> None:
+    """Money in and out of the kitchen fund, newest first."""
+    entries = context.month_entries.transactions
+    paid_in = sum(float(entry.amount) for entry in entries if float(entry.amount) > 0)
+    paid_out = sum(-float(entry.amount) for entry in entries if float(entry.amount) < 0)
+    _ledger_header(
+        "Kitchen fund this month",
+        _signed_amount(paid_in - paid_out) if entries else "None yet",
+        f"{_format_amount_dkk(paid_in)} in · {_format_amount_dkk(paid_out)} out",
+    )
+    if not entries:
+        st.caption("Payments are added from Me.")
         return
 
-    st.table(_table_rows(transaction_entries, amount_keys=["amount"], exclude_keys=["row_number"]))
-    st.subheader("Edit a payment")
-    selected_transaction = st.selectbox(
-        "Payment",
-        transaction_entries,
-        format_func=lambda entry: (
-            f"{entry.date} · {entry.room} · {entry.transaction_type} · {_format_amount_dkk(entry.amount)}"
-        ),
-        key="edit_tx_entry",
-    )
-
-    edit_room_labels = list(context.room_labels)
-    if selected_transaction.room and selected_transaction.room not in edit_room_labels:
-        edit_room_labels.append(selected_transaction.room)
-
-    edit_type_options = ["Payment to kitchen fund", "Payout from kitchen fund"]
-    if selected_transaction.transaction_type and selected_transaction.transaction_type not in edit_type_options:
-        edit_type_options.append(selected_transaction.transaction_type)
-
-    with st.form(key=f"edit_transaction_form_{selected_transaction.row_number}"):
-        edited_room = st.selectbox(
-            "Room",
-            edit_room_labels,
-            index=edit_room_labels.index(selected_transaction.room)
-            if selected_transaction.room in edit_room_labels
-            else 0,
-            format_func=room_display,
-            key=f"edit_tx_room_{selected_transaction.row_number}",
+    for entry in _newest_first(entries, context.selected_sheet_name):
+        direction = "Paid out" if _is_payout(entry.transaction_type) else "Paid in"
+        _ledger_row(
+            title=_person_caption(entry.room, context.room_name_by_label),
+            subtitle=f"{direction} · {_short_date(entry.date, context.selected_sheet_name)}",
+            note=_signed_amount(float(entry.amount)),
+            key=f"payment_{entry.row_number}",
+            help_text="Edit or delete this payment",
+            on_edit=_edit_payment_dialog,
+            args=(service, context, entry, True),
+            mine=entry.room == room,
         )
-        edited_type = st.selectbox(
-            "Payment type",
-            edit_type_options,
-            index=edit_type_options.index(selected_transaction.transaction_type)
-            if selected_transaction.transaction_type in edit_type_options
-            else 0,
-            key=f"edit_tx_type_{selected_transaction.row_number}",
-        )
-        edited_amount = st.number_input(
-            "Amount",
-            min_value=0.0,
-            step=0.01,
-            value=abs(float(selected_transaction.amount)),
-            key=f"edit_tx_amount_{selected_transaction.row_number}",
-        )
-        edited_date = st.date_input(
-            "Date",
-            value=_transaction_date_for_edit(selected_transaction.date, context.selected_sheet_name),
-            key=f"edit_tx_date_{selected_transaction.row_number}",
-        )
-        save_transfer = st.form_submit_button("Save payment")
-        delete_transfer = st.form_submit_button("Delete payment")
 
-    if save_transfer:
-        if edited_amount <= 0:
-            st.error("Add an amount greater than 0 before saving.")
-            return
-        try:
-            st.session_state.pop(_delete_confirmation_key("transfer", context.selected_sheet_name), None)
-            service.update_transaction(
-                context.selected_sheet_name,
-                selected_transaction.row_number,
-                edited_room,
-                edited_type,
-                edited_amount,
-                edited_date,
-            )
-            _invalidate_month_entries(context.selected_sheet_name)
-            st.success("Kitchen fund payment updated.")
-            st.rerun()
-        except ValueError as exc:
-            show_user_error(st, exc, "Could not update kitchen fund payment")
-
-    if delete_transfer:
-        st.session_state[_delete_confirmation_key("transfer", context.selected_sheet_name)] = selected_transaction.row_number
-
-    if st.session_state.get(_delete_confirmation_key("transfer", context.selected_sheet_name)) == selected_transaction.row_number:
-        st.warning("Are you sure you want to delete this payment?")
-        confirm_col, cancel_col = st.columns(2)
-        if confirm_col.button(
-            "Yes, delete payment",
-            key=f"confirm_delete_transfer_{selected_transaction.row_number}",
-        ):
-            try:
-                service.delete_transaction(context.selected_sheet_name, selected_transaction.row_number)
-                st.session_state.pop(_delete_confirmation_key("transfer", context.selected_sheet_name), None)
-                _invalidate_month_entries(context.selected_sheet_name)
-                st.success("Kitchen fund payment deleted.")
-                st.rerun()
-            except ValueError as exc:
-                show_user_error(st, exc, "Could not delete kitchen fund payment")
-        if cancel_col.button("Cancel", key=f"cancel_delete_transfer_{selected_transaction.row_number}"):
-            st.session_state.pop(_delete_confirmation_key("transfer", context.selected_sheet_name), None)
-            st.rerun()
-
-
-def render_day_to_day_view(service: SheetsService):
-    render_today_view(service)
+    st.caption(_table_usage_caption(len(entries), TRANSACTION_ROW_CAPACITY, "payment"))
