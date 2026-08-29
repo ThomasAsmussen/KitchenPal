@@ -2,3 +2,12 @@
 # The app's own accent instead of Streamlit's red: the same petrol as the
 # bottom bar's active tab, so the primary action and the current tab agree.
 primaryColor = "#0E514C"
+
+[client]
+# Residents have no use for Deploy, the hamburger or the running indicator, and
+# on a phone that chrome sits on top of the app. This is Streamlit's own switch
+# for it — a supported setting rather than CSS guessing at class names.
+# It removes what Streamlit puts on the page; the badge in the bottom-right
+# corner of a Community Cloud app is injected by the HOST, not by Streamlit, so
+# the only certain way to be rid of that one is to host the app somewhere else.
+toolbarMode = "minimal"

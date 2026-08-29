@@ -127,7 +127,14 @@ on a personal screen:
   through on_click callbacks: Streamlit reruns by itself afterwards, so never call
   st.rerun() inside one — it prints a warning into the app.
 - The accent is set once in .streamlit/config.toml (primaryColor), so the primary
-  button and the active tab are the same petrol.
+  button and the active tab are the same petrol. The same file sets
+  client.toolbarMode = "minimal", which removes Deploy, the hamburger and the
+  running indicator — Streamlit's own switch, not CSS guessing at class names.
+  It empties the header but does NOT shrink it: the 60px box stays, so the
+  main container keeps its top padding. Do not reclaim that space on the
+  strength of a local screenshot — Community Cloud puts its own controls in
+  that header, and the padding is what keeps the identity chip out from under
+  them.
 - UI language: English interface, Danish content left as residents typed it, one word
   per concept — dinner, host, signup, drinks, shared purchase, kitchen fund, balance.
   Never "food club" or "madklub" in the interface.
