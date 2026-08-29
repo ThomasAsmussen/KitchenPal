@@ -73,12 +73,21 @@ def page_styles(active_slug: str) -> str:
   }}
 
   /* Streamlit Community Cloud floats its own badge in the bottom-right corner,
-     exactly where the House tab is. Hide the ones we know, and out-rank
-     anything else that lands there: on a phone the way back to House matters
-     more than a badge. */
+     exactly over the House tab. Its class names are hashed and change between
+     Cloud releases, so this casts wide: the known test ids, anything whose class
+     mentions a badge or the manage button, and any element appended straight to
+     <body>. That last one is safe here — with a dialog and a popover open, this
+     app's <body> still holds only <noscript> and <div id="root">, because
+     Streamlit portals inside its own root. */
   [data-testid="stStatusWidget"],
   [data-testid="manage-app-button"],
-  [class*="viewerBadge"] {{
+  [data-testid="stAppViewBadge"],
+  [class*="viewerBadge"],
+  [class*="_viewerBadge"],
+  [class*="_profileContainer"],
+  [class*="_manageAppButton"],
+  [class*="_terminalButton"],
+  body > div:not(#root):not([data-testid]) {{
     display: none !important;
   }}
 
@@ -153,7 +162,8 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpalnav {{
     position: fixed;
     left: 0; right: 0; bottom: 0;
-    z-index: 999999;
+    /* the top of the stack: a badge we failed to hide must still lose */
+    z-index: 2147483647;
     background: {bar_bg};
     border-top: 1px solid {line};
     box-shadow: {shadow};

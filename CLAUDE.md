@@ -101,9 +101,13 @@ on a personal screen:
   ending. Read the docstring in ui/nav.py before touching that CSS — the bar is
   matched with `.st-key-kpalnav` exactly, never `[class*=]`.
 - Two things the bar has to survive on a real phone, both measured rather than
-  guessed: Streamlit Community Cloud floats its own badge in the bottom-right
-  corner, exactly over the House tab (hidden by selector, and the bar's z-index
-  raised so anything else that lands there loses); and below 400px Streamlit sets
+  guessed. Community Cloud floats its own badge in the bottom-right corner,
+  exactly over the House tab: its classes are hashed and change between Cloud
+  releases, so the CSS casts wide (known test ids, badge-ish class fragments,
+  and any element appended straight to <body> — safe because with a dialog and a
+  popover open this app's <body> still holds only <noscript> and <div id=root>).
+  The bar also sits at the maximum z-index, which is the part that does not
+  depend on guessing a name: a badge nobody predicted still loses. And below 400px Streamlit sets
   `padding-top: 2.2rem !important` on the main container with the SAME selector
   we use, which put the identity chip's ascenders behind the 60px header. An
   identical selector only ties and loses on order, so ours carries an extra
