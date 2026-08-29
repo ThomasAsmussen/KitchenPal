@@ -26,8 +26,12 @@ def test_add_purchase_writes_first_empty_row():
 
 def test_add_purchase_raises_when_no_empty_row():
     ws = FakeWorksheet("October 2024")
-    # No empty rows in lookup -> should raise (mock doesn't support resizing)
-    ws.set_batch_get(constants.PURCHASE_LOOKUP_RANGE, [["x"] for _ in range(3)])
+    # Every row of the table is taken, so the next purchase would land past the
+    # last row the sheet's Indkøb formula sums — that must raise, not spill.
+    ws.set_batch_get(
+        constants.PURCHASE_LOOKUP_RANGE,
+        [["header"]] + [["x"] for _ in range(constants.PURCHASE_ROW_CAPACITY)],
+    )
 
     service = build_service(FakeSpreadsheet([ws]))
     with pytest.raises(ValueError):
@@ -51,8 +55,8 @@ def test_update_dish_name_and_signup_write_cells():
 def test_add_drinks_raises_when_no_account_row():
     ws = FakeWorksheet("October 2024")
     # Provide empty signup header and account table so get_room_entries returns no rows
-    ws.set_batch_get("I2:AA2", [[]])
-    ws.set_batch_get("A45:B65", [])
+    ws.set_batch_get(constants.DAY_SHEET_SIGNUP_HEADER_RANGE, [[]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [])
     service = build_service(FakeSpreadsheet([ws]))
     with pytest.raises(ValueError):
         service.add_drinks("October 2024", 999, 1, 0)
@@ -73,4 +77,34 @@ def test_add_transaction_writes_values():
     assert updates[0]["values"][0][1] == "24/04"
     assert updates[0]["values"][0][2] == "Payment"
     assert updates[1]["values"] == [[15.5]]
+
+
+def test_add_purchase_writes_to_the_first_free_row():
+    ws = FakeWorksheet("October 2024")
+    ws.set_batch_get(constants.PURCHASE_LOOKUP_RANGE, [["Værelse"], ["346"], ["347"]])
+
+    service = build_service(FakeSpreadsheet([ws]))
+    service.add_purchase("October 2024", 352, date(2026, 5, 24), "Banankage", 42.0)
+
+    assert ws.batch_updates == [
+        [
+            {"range": "AC5:AE5", "values": [[352, "2026-05-24", "Banankage"]]},
+            {"range": "AG5", "values": [[42.0]]},
+        ]
+    ]
+
+
+def test_add_transaction_raises_when_the_payment_table_is_full():
+    ws = FakeWorksheet("October 2024")
+    ws.set_batch_get(
+        constants.TRANSACTION_LOOKUP_RANGE,
+        [["346"] for _ in range(constants.TRANSACTION_ROW_CAPACITY)],
+    )
+
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="full"):
+        service.add_transaction("October 2024", 346, "Payment to kitchen fund", 100.0, date(2026, 5, 24))
+
+    assert ws.batch_updates == []
 

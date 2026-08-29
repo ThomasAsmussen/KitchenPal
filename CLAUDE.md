@@ -13,16 +13,22 @@ Landed today (main == claude-worklog, suite at 146 passed):
 
 Next, in order:
 1. USER_ENTERED formula-write audit: gspread batch_update defaults to RAW (bit us when backfilling Z formulas); audit every code path that writes formulas, and check whether any existing DEV sheet has a text (non-formula) AG37.
-2. The four remaining integrity checks: signup header complete at I2:AA2, account table anchored (A45 == "346"), AG37 contains a formula, AS3:AT3 month metadata present.
+2. September 2026 (DEV and production) still has the template's AS3:AT3 (month 2 of 2025), so its weekday column is wrong — run copy balances on it or fix the two cells by hand.
 3. 3c: People tab restructure (task-language forms, compact two-line people list) and the pending-handover banner (reminder options 1+2).
 
-Open backlog: bytte madklub, the Andet capacity question, birthdays overview, tutorial page.
+Open backlog: bytte madklub, birthdays overview. (The Andet capacity question was
+settled on 2026-08-29 — the block now has 20 rows; see Sheet layout below. The
+tutorial page is dropped in favour of the restructure.)
 
-DEV sheet state: February 2027 deleted; January 2027 restored to its post-copy state; test1 removed from FL2; the Log worksheet permanently contains demo rows from the 2026-08-05 end-to-end tests — real history from here on, but the early rows are test events.
+DEV sheet state: rebuilt on 2026-08-29 with the new layout — it now holds August and
+September 2026 only. The Log worksheet permanently contains demo rows from the
+2026-08-05 and 2026-08-29 end-to-end tests; real history from here on.
 
 Manual tasks for Thomas (the app can't do these):
-- Backfill the closing-balance formulas (=sum(F{row}:X{row}) in Z45:Z65) into the PRODUCTION month sheets — the Skabelon fix only helps sheets created from now on.
-- Mark today's fixed items Done in the production Bugs and New Features tabs.
+- Mark fixed items Done in the production Bugs and New Features tabs.
+- test_sheet.xlsx in the working tree is a fresh export and carries 12 e-mail
+  addresses and 9 phone numbers in "Kopi af In-House Liste". The repo is public:
+  mask it, or move it out and point KITCHENPAL_TEST_SHEET at it. Not committed.
 
 # Dev loop
 
@@ -44,6 +50,31 @@ Manual tasks for Thomas (the app can't do these):
 - This repo is PUBLIC. Never write sheet data, roster data, or credentials anywhere inside the repo directory — dumps go to ~/.cache/kitchenpal/.
 - Branches: commit to claude-worklog ONLY. Never push or merge to main — Thomas merges deliberately once a chunk is reviewed and he wants it live. (Both branches are identical up to b6b5b26; that predates this rule.)
 
+# Sheet layout (verified against the live sheet 2026-08-29)
+
+The Andet block was grown from 9 rows to 20 on 2026-08-29, which pushed everything
+below it down by 11 rows on every month sheet and on Skabelon. Column blocks that
+live to the right (AC:AG) did not move.
+
+    rows  3-33   Indkøb — 31 purchase rows; the sheet sums SUMIF($AC$3:$AC$33,...)
+    rows 35-42   STATUS box and bank details (labels AC, amounts AG)
+    row   43     payment table header
+    rows 44-55   kitchen fund payments — 12 rows; SUMIF($AC$44:$AC$55,...)
+    rows  3-33   day table (A:AB), rows 34-53 Andet (same columns, no date)
+    row   54     "Personlige Regnskaber", row 55 "Værelse | Navn"
+    rows 56-76   personal accounts: 346-360, FL1-FL5, Spotify
+
+Rules that follow from it:
+- Never write past a table's last row. The balance formulas only sum the rows
+  above, so a spilled row is money that silently never lands, and rows 34-43 hold
+  the STATUS box. Capacities are in constants (31 purchases, 12 payments) and the
+  UI shows how many are used.
+- The nth account row must line up with the nth signup column (I2:AB2) and the nth
+  KØVS row: the sheet charges meals with INDEX($I$3:$AB$53, 0, ROW(A1)) and drinks
+  with =-AP3. Reordering one list without the other bills the wrong people.
+- tests/test_transfer_purchase_layout.py is the single place these row numbers are
+  pinned to literals; check_month_sheet_integrity checks a live sheet against them.
+
 # Copy-balances contract (protected, v2 — implemented 2026-08-05)
 
 `copy_balances_from_previous_month(month, year)` in src/kitchenpal/sheets/months.py is the most damage-prone code in the app — wrong numbers propagate for months. Its behaviour is pinned by the copy_balances tests in tests/test_sheets_service.py; do not change it without explicit sign-off. Balances belong to people; rooms are where a person currently lives.
@@ -51,8 +82,8 @@ Manual tasks for Thomas (the app can't do these):
 Resolution and mechanics:
 - Previous-month resolution incl. Dec→Jan year rollover; English/Danish sheet names,
   exact then case-insensitive; ValueError when previous or current sheet is missing.
-- Read ranges (previous A45:B65, Z45:Z65, AG37; current A45:B65) and write ranges
-  (B45:B{n}, I45:I65, AS3:AT3, AG37 formula "=<prev, comma-decimal, no thousands
+- Read ranges (previous A56:B76, Z56:Z76, AG37; current A56:B76) and write ranges
+  (B56:B{n}, I56:I76, AS3:AT3, AG37 formula "=<prev, comma-decimal, no thousands
   sep>+sum(AG44:AG55)"). One batch_update + one update_acell. Z never written.
 - Unparseable balances → 0.0. Blank AG37 → ValueError. Blank current labels → "" / 0.0.
 
@@ -84,7 +115,7 @@ Special rows and creation:
   accounting-only, never people: their name and balance carry forward by label
   (overwriting the current cell), and they are excluded from filling, chasing,
   rename and duplicate detection. Never chase a balance into such a row.
-- create_month_sheet blanks the person-row name cells (B45:B65, non-person rows
+- create_month_sheet blanks the person-row name cells (B56:B76, non-person rows
   kept) right after duplicating the template, so a fresh sheet always arrives in
   a known state whatever names the template holds. Do not detect template names
   by comparing against Skabelon — a real resident's name could match.
@@ -97,7 +128,7 @@ refreshed on every save. Rows with a blank Room fall back to a normalized-name k
 The UI looks stored preferences up by `room_entry.label` for the same reason.
 
 Why: the UI identifies people as `entry.name or entry.label` from the month sheet's
-B45:B65. That cell legitimately changes (create_month_sheet blanks it, copy-balances
+B56:B76. That cell legitimately changes (create_month_sheet blanks it, copy-balances
 fills it back in, occupancy actions rewrite it), so name-keyed rows flipped identity
 underneath residents: their preferences stopped loading, the picker came up empty, and
 saving appended a duplicate row while the old one kept the room number as its "name".

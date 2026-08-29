@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from ..a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
-from ..constants import DANISH_TO_ENGLISH_MONTH, ENGLISH_MONTHS, ENGLISH_TO_DANISH_MONTH, PURCHASE_LOOKUP_RANGE
+from ..constants import (
+    DANISH_TO_ENGLISH_MONTH,
+    ENGLISH_MONTHS,
+    ENGLISH_TO_DANISH_MONTH,
+    PURCHASE_LOOKUP_RANGE,
+    PURCHASE_ROW_CAPACITY,
+    TRANSACTION_ROW_CAPACITY,
+)
 from ..runtime_state import bump_cache_version, cache_key, get_cache_version
 from ..sheets.utils import parse_month_sheet_name
 from ..sheets_service import SheetsService
@@ -466,6 +473,17 @@ def _render_drinks_section(service: SheetsService, context: DayToDayContext):
         st.caption("No drink rows found.")
 
 
+def _table_usage_caption(used: int, capacity: int, noun: str) -> str:
+    # The sheet's own formulas only sum the rows inside the table, so running
+    # out is a real limit rather than a formality — say so before it bites.
+    remaining = capacity - used
+    if remaining <= 0:
+        return f"The {noun} table is full ({used} of {capacity} rows). Edit or delete one before adding another."
+    if remaining <= 5:
+        return f"{used} of {capacity} {noun} rows used this month — {remaining} left."
+    return f"{used} of {capacity} {noun} rows used this month."
+
+
 def _render_purchases_section(service: SheetsService, context: DayToDayContext):
     st.header("Shared kitchen purchase")
     room_display = _room_display_factory(context.room_name_by_label)
@@ -516,6 +534,7 @@ def _render_purchases_section(service: SheetsService, context: DayToDayContext):
 
     st.subheader("Registered purchases")
     purchase_entries = context.month_entries.purchases
+    st.caption(_table_usage_caption(len(purchase_entries), PURCHASE_ROW_CAPACITY, "purchase"))
     if not purchase_entries:
         st.caption("No purchases yet.")
         return
@@ -665,6 +684,7 @@ def _render_transfers_section(service: SheetsService, context: DayToDayContext, 
 
     st.subheader("Registered kitchen fund payments")
     transaction_entries = context.month_entries.transactions
+    st.caption(_table_usage_caption(len(transaction_entries), TRANSACTION_ROW_CAPACITY, "payment"))
     if not transaction_entries:
         st.caption("No payments yet.")
         return

@@ -8,11 +8,11 @@ from kitchenpal.sheets_service import PlanningEntry, RoomEntry, SheetsService
 
 def set_room_directory(ws):
     ws.set_batch_get(
-        "I2:AA2",
+        constants.DAY_SHEET_SIGNUP_HEADER_RANGE,
         [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]],
     )
     ws.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [
             ["346", "Julia"],
             ["347", "Johannes"],
@@ -82,8 +82,10 @@ class FakeWorksheet:
         self.batch_get_calls.append(list(ranges))
         if value_render_option == "FORMULA":
             formulas = getattr(self, "_batch_get_formulas", {})
-            return [formulas[r] for r in ranges]
-        return [self._batch_get[r] for r in ranges]
+            # An unset range reads back empty, exactly like an untouched
+            # region of a real sheet.
+            return [formulas.get(r, []) for r in ranges]
+        return [self._batch_get.get(r, []) for r in ranges]
 
     def batch_update(self, updates):
         self.batch_updates.append(updates)
@@ -225,7 +227,7 @@ def test_update_meal_details_rejects_invalid_price():
 
 def test_add_transaction_writes_first_empty_row():
     ws = FakeWorksheet("October 2024")
-    ws.set_batch_get("AC44:AC55", [["filled"], ["filled"], [], ["filled"]])
+    ws.set_batch_get(constants.TRANSACTION_LOOKUP_RANGE, [["filled"], ["filled"], [], ["filled"]])
 
     service = build_service(FakeSpreadsheet([ws]))
     service.add_transaction("October 2024", 350, "Payment to kitchen fund", 125.5, __import__("datetime").date(2026, 4, 24))
@@ -238,7 +240,7 @@ def test_add_transaction_writes_first_empty_row():
 
 def test_add_transaction_raises_when_no_empty_row():
     ws = FakeWorksheet("October 2024")
-    ws.set_batch_get("AC44:AC55", [["x"] for _ in range(12)])
+    ws.set_batch_get(constants.TRANSACTION_LOOKUP_RANGE, [["x"] for _ in range(12)])
 
     service = build_service(FakeSpreadsheet([ws]))
     with pytest.raises(ValueError):
@@ -252,7 +254,7 @@ def test_get_drink_entries_returns_room_rows():
     header_row[34] = "KØVS"
     ws.set_batch_get("A1:AZ1", [header_row])
     ws.set_batch_get(
-        "AI3:AK21",
+        constants.DRINK_TABLE_RANGE,
         [
             [346, 46, None],
             [347, 40, None],
@@ -287,7 +289,7 @@ def test_update_drinks_writes_existing_row():
 def test_get_purchase_entries_returns_rows():
     ws = FakeWorksheet("October 2024")
     ws.set_batch_get(
-        "AC3:AG43",
+        constants.PURCHASE_TABLE_RANGE,
         [
             ["Værelse", "Dato", "Vare", None, "Beløb"],
             [352, __import__("datetime").datetime(2026, 5, 3), "Banankage til køkkenmøde", None, "42,00 kr"],
@@ -337,7 +339,7 @@ def test_delete_purchase_clears_existing_row():
 def test_get_transaction_entries_returns_rows():
     ws = FakeWorksheet("October 2024")
     ws.set_batch_get(
-        "AC44:AG200",
+        constants.TRANSACTION_TABLE_RANGE,
         [
             ["Spotify", "1/5", "Udbetaling", None, "-29,00 kr"],
             ["FL2", "4/5", "Indbetaling", None, "202,62 kr"],
@@ -359,21 +361,21 @@ def test_get_transaction_entries_returns_rows():
 def test_get_day_to_day_entries_reads_lists_in_one_batch():
     ws = FakeWorksheet("October 2024")
     ws.set_batch_get(
-        "AI3:AK21",
+        constants.DRINK_TABLE_RANGE,
         [
             [346, 46, None],
             ["FL1", None, 1],
         ],
     )
     ws.set_batch_get(
-        "AC3:AG43",
+        constants.PURCHASE_TABLE_RANGE,
         [
             ["Værelse", "Dato", "Vare", None, "Beløb"],
             [352, __import__("datetime").datetime(2026, 5, 3), "Banankage", None, "42,00 kr"],
         ],
     )
     ws.set_batch_get(
-        "AC44:AG200",
+        constants.TRANSACTION_TABLE_RANGE,
         [
             ["FL2", "4/5", "Indbetaling", None, "202,62 kr"],
         ],
@@ -388,7 +390,7 @@ def test_get_day_to_day_entries_reads_lists_in_one_batch():
         ],
     )
 
-    assert ws.batch_get_calls == [["AI3:AK21", "AC3:AG43", "AC44:AG200"]]
+    assert ws.batch_get_calls == [[constants.DRINK_TABLE_RANGE, constants.PURCHASE_TABLE_RANGE, constants.TRANSACTION_TABLE_RANGE]]
     assert [entry.name for entry in entries.drinks] == ["Julia", "Gustav"]
     assert [entry.item for entry in entries.purchases] == ["Banankage"]
     assert [entry.room for entry in entries.transactions] == ["FL2"]
@@ -397,7 +399,7 @@ def test_get_day_to_day_entries_reads_lists_in_one_batch():
 def test_get_transaction_payout_marks_amount_negative():
     ws = FakeWorksheet("October 2024")
     # empty lookup so add_transaction writes to first lookup row
-    ws.set_batch_get("AC44:AC55", [[], ["x"], ["x"]])
+    ws.set_batch_get(constants.TRANSACTION_LOOKUP_RANGE, [[], ["x"], ["x"]])
 
     service = build_service(FakeSpreadsheet([ws]))
     service.add_transaction("October 2024", 346, "Udbetaling", 29.0, __import__("datetime").date(2026, 5, 24))
@@ -442,7 +444,7 @@ def test_get_drink_entries_skips_header_row():
     header_row[34] = "KØVS"
     ws.set_batch_get("A1:AZ1", [header_row])
     ws.set_batch_get(
-        "AI3:AK21",
+        constants.DRINK_TABLE_RANGE,
         [
             ["Værelse", "Øl/Sodavand", "Vin"],
             [346, 46, 1],
@@ -463,7 +465,7 @@ def test_create_month_sheet_duplicates_template_and_blanks_person_names():
     # holds: person names blanked, non-person rows (Spotify) left untouched.
     template = FakeWorksheet("Template", worksheet_id=999)
     template.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [["346", "Stale Name"], ["FL1", "Old FL Person"], ["Spotify", "Daniel Vorting"]],
     )
     other = FakeWorksheet("October 2024")
@@ -475,7 +477,7 @@ def test_create_month_sheet_duplicates_template_and_blanks_person_names():
     assert spreadsheet.duplicate_calls == [(999, "November 2026")]
     new_sheet = spreadsheet.worksheet("November 2026")
     assert new_sheet.batch_updates == [
-        [{"range": "B45:B47", "values": [[""], [""], ["Daniel Vorting"]]}]
+        [{"range": "B56:B58", "values": [[""], [""], ["Daniel Vorting"]]}]
     ]
 
 
@@ -739,7 +741,7 @@ def test_save_possible_days_limit_appends_new_month():
 def test_copy_balances_from_previous_month_updates_expected_ranges():
     previous = FakeWorksheet("April 2026")
     previous.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [
             ["346", "Julia"],
             ["347", "Johannes"],
@@ -747,12 +749,12 @@ def test_copy_balances_from_previous_month_updates_expected_ranges():
             ["349", "Thomas"],
         ],
     )
-    previous.set_batch_get("Z45:Z65", [["1.234,50 kr"], ["Beløb"], [500], ["0,00 kr"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [["1.234,50 kr"], ["Beløb"], [500], ["0,00 kr"]])
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
 
     current = FakeWorksheet("May 2026")
     current.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [
             ["346", "Julia"],
             ["347", "Johannes"],
@@ -768,9 +770,9 @@ def test_copy_balances_from_previous_month_updates_expected_ranges():
     assert len(current.batch_updates) == 1
     updates = current.batch_updates[0]
 
-    assert updates[0]["range"] == "B45:B48"
+    assert updates[0]["range"] == "B56:B59"
     assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Alberte"], ["Thomas"]]
-    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["range"] == constants.PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE
     assert updates[1]["values"] == [[1234.5], [0.0], [500.0], [0.0]]
     assert updates[2]["range"] == "AS3:AT3"
     assert updates[2]["values"] == [[5, 2026]]
@@ -795,21 +797,21 @@ def test_copy_balances_from_previous_month_requires_current_sheet():
 
 def test_copy_balances_from_previous_month_accepts_danish_sheet_names():
     previous = FakeWorksheet("Maj 2026")
-    previous.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
-    previous.set_batch_get("Z45:Z65", [["1.234,50 kr"], ["0,00 kr"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Johannes"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [["1.234,50 kr"], ["0,00 kr"]])
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
 
     current = FakeWorksheet("Juni 2026")
-    current.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Johannes"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     service.copy_balances_from_previous_month("Juni", 2026)
 
     assert len(current.batch_updates) == 1
     updates = current.batch_updates[0]
-    assert updates[0]["range"] == "B45:B46"
+    assert updates[0]["range"] == "B56:B57"
     assert updates[0]["values"] == [["Julia"], ["Johannes"]]
-    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["range"] == constants.PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE
     assert updates[1]["values"] == [[1234.5], [0.0]]
     assert updates[2]["range"] == "AS3:AT3"
     assert updates[2]["values"] == [[6, 2026]]
@@ -822,26 +824,26 @@ def test_copy_balances_fills_blank_names_and_keeps_typed_names():
     # that person's previous balance (0.0 for someone new to the house).
     previous = FakeWorksheet("May 2026")
     previous.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [
             ["346", "Julia"],
             ["347", "Johannes"],
             ["FL1", "Gustav"],
         ],
     )
-    previous.set_batch_get("Z45:Z65", [[100.0], [200.0], [300.0]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [200.0], [300.0]])
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["346", ""], ["347", ""], ["FL1", ""], ["FL2", "Template Person"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", ""], ["347", ""], ["FL1", ""], ["FL2", "Template Person"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     report = service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
-    assert updates[0]["range"] == "B45:B48"
+    assert updates[0]["range"] == "B56:B59"
     assert updates[0]["values"] == [["Julia"], ["Johannes"], ["Gustav"], ["Template Person"]]
-    assert updates[1]["range"] == "I45:I65"
+    assert updates[1]["range"] == constants.PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE
     assert updates[1]["values"] == [[100.0], [200.0], [300.0], [0.0]]
     assert report.chased == []
     assert report.unplaced == []
@@ -849,12 +851,12 @@ def test_copy_balances_fills_blank_names_and_keeps_typed_names():
 
 def test_copy_balances_from_previous_month_requires_account_value():
     previous = FakeWorksheet("May 2026")
-    previous.set_batch_get("A45:B65", [["346", "Julia"]])
-    previous.set_batch_get("Z45:Z65", [["100,00 kr"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [["100,00 kr"]])
     previous.set_batch_get("AG37", [])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["346", "Julia"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     with pytest.raises(ValueError, match=r"Expected a value in May 2026!AG37"):
@@ -867,28 +869,28 @@ def test_copy_balances_from_previous_month_requires_account_value():
 def test_add_person_as_fl_uses_first_available_fl_spot():
     ws = FakeWorksheet("June 2026")
     ws.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [["346", "Julia"], ["FL1", "Gustav"], ["FL2", ""], ["FL3", ""]],
     )
-    ws.set_batch_get("Z45:Z65", [[100.0], [0.0], [0.0], [0.0]])
-    ws.set_batch_get("I2:AA2", [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [0.0], [0.0], [0.0]])
+    ws.set_batch_get(constants.DAY_SHEET_SIGNUP_HEADER_RANGE, [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]])
     service = build_service(FakeSpreadsheet([ws]))
 
     fl_label = service.add_person_as_fl("June 2026", "New Person")
 
     assert fl_label == "FL2"
-    assert ws.batch_updates == [[{"range": "B47", "values": [["New Person"]]}, {"range": "I47", "values": [[0.0]]}]]
+    assert ws.batch_updates == [[{"range": "B58", "values": [["New Person"]]}, {"range": "I58", "values": [[0.0]]}]]
 
 
 def test_replace_room_person_moves_replaced_person_to_first_available_fl():
     ws = FakeWorksheet("June 2026")
     ws.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [["346", "Julia"], ["347", "Johannes"], ["FL1", ""], ["FL2", "Gustav"]],
     )
-    ws.set_batch_get("Z45:Z65", [[100.0], [200.0], [0.0], [300.0]])
-    ws.set_cell(45, 9, 100.0)
-    ws.set_cell(47, 9, "")
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [200.0], [0.0], [300.0]])
+    ws.set_cell(56, 9, 100.0)
+    ws.set_cell(58, 9, "")
     service = build_service(FakeSpreadsheet([ws]))
 
     fl_label = service.replace_room_person("June 2026", "346", "New Person")
@@ -896,10 +898,10 @@ def test_replace_room_person_moves_replaced_person_to_first_available_fl():
     assert fl_label == "FL1"
     assert ws.batch_updates == [
         [
-            {"range": "B45", "values": [["New Person"]]},
-            {"range": "I45", "values": [[0.0]]},
-            {"range": "B47", "values": [["Julia"]]},
-            {"range": "I47", "values": [[100.0]]},
+            {"range": "B56", "values": [["New Person"]]},
+            {"range": "I56", "values": [[0.0]]},
+            {"range": "B58", "values": [["Julia"]]},
+            {"range": "I58", "values": [[100.0]]},
         ]
     ]
 
@@ -907,12 +909,12 @@ def test_replace_room_person_moves_replaced_person_to_first_available_fl():
 def test_replace_room_person_moves_existing_fl_person_into_room():
     ws = FakeWorksheet("June 2026")
     ws.set_batch_get(
-        "A45:B65",
+        constants.PERSONAL_ACCOUNT_TABLE_RANGE,
         [["346", "Julia"], ["347", "Johannes"], ["FL1", "Gustav"], ["FL2", ""]],
     )
-    ws.set_batch_get("Z45:Z65", [[100.0], [200.0], [300.0], [0.0]])
-    ws.set_cell(45, 9, 100.0)
-    ws.set_cell(47, 9, 300.0)
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [200.0], [300.0], [0.0]])
+    ws.set_cell(56, 9, 100.0)
+    ws.set_cell(58, 9, 300.0)
     service = build_service(FakeSpreadsheet([ws]))
 
     fl_label = service.replace_room_person("June 2026", "346", "Gustav")
@@ -920,18 +922,18 @@ def test_replace_room_person_moves_existing_fl_person_into_room():
     assert fl_label == "FL1"
     assert ws.batch_updates == [
         [
-            {"range": "B45", "values": [["Gustav"]]},
-            {"range": "I45", "values": [[300.0]]},
-            {"range": "B47", "values": [["Julia"]]},
-            {"range": "I47", "values": [[100.0]]},
+            {"range": "B56", "values": [["Gustav"]]},
+            {"range": "I56", "values": [[300.0]]},
+            {"range": "B58", "values": [["Julia"]]},
+            {"range": "I58", "values": [[100.0]]},
         ]
     ]
 
 
 def test_replace_room_person_allows_empty_room():
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", ""], ["FL1", "Gustav"]])
-    ws.set_batch_get("Z45:Z65", [[0.0], [300.0]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", ""], ["FL1", "Gustav"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [300.0]])
     service = build_service(FakeSpreadsheet([ws]))
 
     label = service.replace_room_person("June 2026", "346", "New Person")
@@ -939,56 +941,56 @@ def test_replace_room_person_allows_empty_room():
     assert label == "346"
     assert ws.batch_updates == [
         [
-            {"range": "B45", "values": [["New Person"]]},
-            {"range": "I45", "values": [[0.0]]},
+            {"range": "B56", "values": [["New Person"]]},
+            {"range": "I56", "values": [[0.0]]},
         ]
     ]
 
 
 def test_move_person_between_accounts_moves_to_empty_account():
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL1", ""]])
-    ws.set_batch_get("Z45:Z65", [[100.0], [0.0]])
-    ws.set_cell(45, 9, 100.0)
-    ws.set_cell(46, 9, "")
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["FL1", ""]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [0.0]])
+    ws.set_cell(56, 9, 100.0)
+    ws.set_cell(57, 9, "")
     service = build_service(FakeSpreadsheet([ws]))
 
     service.move_person_between_accounts("June 2026", "346", "FL1")
 
     assert ws.batch_updates == [
         [
-            {"range": "B46", "values": [["Julia"]]},
-            {"range": "I46", "values": [[100.0]]},
-            {"range": "B45", "values": [[""]]},
-            {"range": "I45", "values": [[0.0]]},
+            {"range": "B57", "values": [["Julia"]]},
+            {"range": "I57", "values": [[100.0]]},
+            {"range": "B56", "values": [[""]]},
+            {"range": "I56", "values": [[0.0]]},
         ]
     ]
 
 
 def test_move_person_between_accounts_swaps_occupied_accounts():
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
-    ws.set_batch_get("Z45:Z65", [[100.0], [200.0]])
-    ws.set_cell(45, 9, 100.0)
-    ws.set_cell(46, 9, 200.0)
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Johannes"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[100.0], [200.0]])
+    ws.set_cell(56, 9, 100.0)
+    ws.set_cell(57, 9, 200.0)
     service = build_service(FakeSpreadsheet([ws]))
 
     service.move_person_between_accounts("June 2026", "346", "347")
 
     assert ws.batch_updates == [
         [
-            {"range": "B46", "values": [["Julia"]]},
-            {"range": "I46", "values": [[100.0]]},
-            {"range": "B45", "values": [["Johannes"]]},
-            {"range": "I45", "values": [[200.0]]},
+            {"range": "B57", "values": [["Julia"]]},
+            {"range": "I57", "values": [[100.0]]},
+            {"range": "B56", "values": [["Johannes"]]},
+            {"range": "I56", "values": [[200.0]]},
         ]
     ]
 
 
 def test_delete_fl_person_requires_zero_balance():
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL1", "Gustav"]])
-    ws.set_batch_get("Z45:Z65", [[0.0], [50.0]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["FL1", "Gustav"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [50.0]])
     service = build_service(FakeSpreadsheet([ws]))
 
     with pytest.raises(ValueError, match="balance is 50.00 DKK"):
@@ -999,23 +1001,23 @@ def test_delete_fl_person_requires_zero_balance():
 
 def test_delete_fl_person_clears_name_when_balance_is_zero():
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL1", "Gustav"]])
-    ws.set_batch_get("Z45:Z65", [[0.0], [0.0]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["FL1", "Gustav"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0], [0.0]])
     service = build_service(FakeSpreadsheet([ws]))
 
     service.delete_fl_person("June 2026", "Gustav")
 
-    assert ws.batch_updates == [[{"range": "B46", "values": [[""]]}, {"range": "I46", "values": [[0.0]]}]]
+    assert ws.batch_updates == [[{"range": "B57", "values": [[""]]}, {"range": "I57", "values": [[0.0]]}]]
 
 
 def test_delete_fl_person_checks_previous_month_balance_when_provided():
     previous = FakeWorksheet("May 2026")
-    previous.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    previous.set_batch_get("Z45:Z65", [[50.0]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[50.0]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    current.set_batch_get("Z45:Z65", [[0.0]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
 
     service = build_service(FakeSpreadsheet([previous, current]))
 
@@ -1049,12 +1051,12 @@ def test_populate_cooks_for_month_writes_room_numbers_to_day_rows():
 
 def test_copy_balances_from_previous_month_january_reads_december_of_previous_year():
     previous = FakeWorksheet("December 2026")
-    previous.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
-    previous.set_batch_get("Z45:Z65", [["100,00 kr"], ["-50,00 kr"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Johannes"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [["100,00 kr"], ["-50,00 kr"]])
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
 
     current = FakeWorksheet("January 2027")
-    current.set_batch_get("A45:B65", [["346", "Julia"], ["347", "Johannes"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"], ["347", "Johannes"]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     service.copy_balances_from_previous_month("January", 2027)
@@ -1070,11 +1072,11 @@ def test_copy_balances_from_previous_month_january_reads_december_of_previous_ye
 
 def _copy_balances_sheets(previous_rows, previous_balances, current_rows, previous_name="May 2026", current_name="June 2026"):
     previous = FakeWorksheet(previous_name)
-    previous.set_batch_get("A45:B65", previous_rows)
-    previous.set_batch_get("Z45:Z65", previous_balances)
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, previous_rows)
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, previous_balances)
     previous.set_batch_get("AG37", [["2.000,00 kr"]])
     current = FakeWorksheet(current_name)
-    current.set_batch_get("A45:B65", current_rows)
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, current_rows)
     return previous, current
 
 
@@ -1087,7 +1089,7 @@ def test_copy_balances_writes_exactly_three_ranges_plus_account_formula():
     assert len(current.batch_updates) == 1
     updates = current.batch_updates[0]
     assert len(updates) == 3
-    assert [u["range"] for u in updates] == ["B45:B45", "I45:I65", "AS3:AT3"]
+    assert [u["range"] for u in updates] == ["B56:B56", constants.PERSONAL_ACCOUNT_SHEET_PREVIOUS_BALANCE_RANGE, "AS3:AT3"]
     assert list(current.updated_acells) == ["AG37"]
     assert previous.batch_updates == []
 
@@ -1104,7 +1106,7 @@ def test_copy_balances_reports_unplaced_person_when_no_fl_slot_is_free():
     report = service.copy_balances_from_previous_month("June", 2026)
 
     updates = current.batch_updates[0]
-    assert updates[0] == {"range": "B45:B45", "values": [["Julia"]]}
+    assert updates[0] == {"range": "B56:B56", "values": [["Julia"]]}
     assert updates[1]["values"] == [[100.0]]
     assert report.unplaced == [("Johannes", 200.0)]
     assert report.chased == []
@@ -1328,12 +1330,12 @@ def test_copy_balances_never_chases_into_or_blanks_the_spotify_row():
 
 def test_delete_fl_person_auto_checks_previous_month_and_refuses_leftover_tab():
     previous = FakeWorksheet("May 2026")
-    previous.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    previous.set_batch_get("Z45:Z65", [[-50.0]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[-50.0]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    current.set_batch_get("Z45:Z65", [[0.0]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     with pytest.raises(ValueError, match=r"May 2026 balance is -50.00 DKK"):
@@ -1344,27 +1346,27 @@ def test_delete_fl_person_auto_checks_previous_month_and_refuses_leftover_tab():
 
 def test_delete_fl_person_allows_when_both_months_are_zero():
     previous = FakeWorksheet("May 2026")
-    previous.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    previous.set_batch_get("Z45:Z65", [[0.0]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    current.set_batch_get("Z45:Z65", [[0.0]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     service.delete_fl_person("June 2026", "Gustav")
 
-    assert current.batch_updates == [[{"range": "B45", "values": [[""]]}, {"range": "I45", "values": [[0.0]]}]]
+    assert current.batch_updates == [[{"range": "B56", "values": [[""]]}, {"range": "I56", "values": [[0.0]]}]]
 
 
 def test_delete_fl_person_allows_when_person_absent_from_previous_month():
     previous = FakeWorksheet("May 2026")
-    previous.set_batch_get("A45:B65", [["346", "Julia"]])
-    previous.set_batch_get("Z45:Z65", [[999.0]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["346", "Julia"]])
+    previous.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[999.0]])
 
     current = FakeWorksheet("June 2026")
-    current.set_batch_get("A45:B65", [["FL1", "Gustav"]])
-    current.set_batch_get("Z45:Z65", [[0.0]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, [["FL1", "Gustav"]])
+    current.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, [[0.0]])
     service = build_service(FakeSpreadsheet([previous, current]))
 
     service.delete_fl_person("June 2026", "Gustav")
@@ -1375,39 +1377,145 @@ def test_delete_fl_person_allows_when_person_absent_from_previous_month():
 # --- Sheet integrity check (3b prep): failing until implemented ---
 
 
+# The signup header as the sheet has it now: LUKKET became FL4 and FL5 was added.
+SIGNUP_HEADER = [[
+    "346", "347", "348", "349", "350", "351", "352", "353", "354", "355",
+    "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "FL4", "FL5",
+]]
+
+
+def _integrity_worksheet(
+    labels,
+    formulas,
+    *,
+    title="June 2026",
+    header_row=constants.PERSONAL_ACCOUNT_TABLE_START_ROW - 1,
+    signup=None,
+    account_formula="=100,00+SUM(AG44:AG55)",
+    metadata=None,
+):
+    """A month sheet that passes every integrity check unless a caller breaks one."""
+    ws = FakeWorksheet(title)
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, labels)
+    ws.set_batch_get_formulas(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, formulas)
+
+    search_start = int(constants.PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE.split(":")[0][1:])
+    header_rows = [["", ""] for _ in range(header_row - search_start)] + [["Værelse", "Navn"]]
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE, header_rows)
+
+    if signup is None:
+        signup = [str(row[0]) for row in labels if str(row[0]).strip()]
+    ws.set_batch_get(constants.DAY_SHEET_SIGNUP_HEADER_RANGE, [signup])
+    ws.set_batch_get_formulas(constants.PERSONAL_ACCOUNT_SHEET_ACCOUNT_CELL, [[account_formula]])
+    ws.set_batch_get(constants.MONTH_METADATA_RANGE, metadata if metadata is not None else [[6, 2026]])
+    return ws
+
+
 def test_check_month_sheet_integrity_flags_account_rows_without_closing_formula():
-    ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["FL4", ""], ["Spotify", "Daniel"]])
-    ws.set_batch_get_formulas("Z45:Z65", [["=sum(F45:X45)"], [""], ["=sum(F47:X47)"]])
+    ws = _integrity_worksheet(
+        [["346", "Julia"], ["FL4", ""], ["Spotify", "Daniel"]],
+        [["=sum(F56:X56)"], [""], ["=sum(F58:X58)"]],
+    )
     service = build_service(FakeSpreadsheet([ws]))
 
     problems = service.check_month_sheet_integrity("June 2026")
 
     assert problems == [
-        "June 2026: account row FL4 has no closing-balance formula in Z46 — "
+        "June 2026: account row FL4 has no closing-balance formula in Z57 — "
         "balances on this row read as 0 and vanish at the next rollover."
     ]
 
 
 def test_check_month_sheet_integrity_passes_clean_sheet_and_skips_blank_labels():
-    ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", [["346", "Julia"], ["", ""], ["FL5", ""]])
-    ws.set_batch_get_formulas("Z45:Z65", [["=sum(F45:X45)"], [""], ["=sum(F47:X47)"]])
+    ws = _integrity_worksheet(
+        [["346", "Julia"], ["", ""], ["FL5", ""]],
+        [["=sum(F56:X56)"], [""], ["=sum(F58:X58)"]],
+        signup=["346", "", "FL5"],
+    )
     service = build_service(FakeSpreadsheet([ws]))
 
     assert service.check_month_sheet_integrity("June 2026") == []
 
 
-# --- 3b: occupancy actions and Log writes: failing until implemented ---
+def test_check_month_sheet_integrity_flags_a_moved_account_table():
+    # The Andet block growing by eleven rows is exactly this failure.
+    ws = _integrity_worksheet(
+        [["346", "Julia"]],
+        [["=sum(F56:X56)"]],
+        header_row=constants.PERSONAL_ACCOUNT_TABLE_START_ROW + 4,
+    )
+    service = build_service(FakeSpreadsheet([ws]))
 
-SIGNUP_HEADER = [["346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "FL1", "FL2", "FL3", "LUKKET"]]
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert "the account table starts at row" in problems[0]
+    assert constants.PERSONAL_ACCOUNT_TABLE_RANGE in problems[0]
+
+
+def test_check_month_sheet_integrity_flags_a_missing_account_header():
+    ws = _integrity_worksheet([["346", "Julia"]], [["=sum(F56:X56)"]])
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE, [["", ""]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert "was not found" in problems[0]
+
+
+def test_check_month_sheet_integrity_flags_signup_columns_out_of_order():
+    ws = _integrity_worksheet(
+        [["346", "Julia"], ["347", "Johannes"]],
+        [["=sum(F56:X56)"], ["=sum(F57:X57)"]],
+        signup=["346", "348"],
+    )
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert "signup column 2 is '348'" in problems[0]
+    assert "meal costs land on the wrong person" in problems[0]
+
+
+def test_check_month_sheet_integrity_flags_typed_account_total():
+    ws = _integrity_worksheet([["346", "Julia"]], [["=sum(F56:X56)"]], account_formula="11407,72")
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert constants.PERSONAL_ACCOUNT_SHEET_ACCOUNT_CELL in problems[0]
+
+
+def test_check_month_sheet_integrity_flags_month_metadata_from_the_template():
+    # A sheet duplicated from Skabelon keeps the template's month until someone
+    # copies balances into it, and then every weekday in column B is wrong.
+    ws = _integrity_worksheet([["346", "Julia"]], [["=sum(F56:X56)"]], metadata=[[2, 2025]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert "month 2 of 2025" in problems[0]
+
+
+def test_check_month_sheet_integrity_flags_empty_month_metadata():
+    ws = _integrity_worksheet([["346", "Julia"]], [["=sum(F56:X56)"]], metadata=[["", ""]])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    problems = service.check_month_sheet_integrity("June 2026")
+
+    assert len(problems) == 1
+    assert constants.MONTH_METADATA_RANGE in problems[0]
 
 
 def _occupancy_sheet(rows, balances, cells=(), with_log=True):
     ws = FakeWorksheet("June 2026")
-    ws.set_batch_get("A45:B65", rows)
-    ws.set_batch_get("Z45:Z65", balances)
-    ws.set_batch_get("I2:AA2", SIGNUP_HEADER)
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_TABLE_RANGE, rows)
+    ws.set_batch_get(constants.PERSONAL_ACCOUNT_SHEET_BALANCE_RANGE, balances)
+    ws.set_batch_get(constants.DAY_SHEET_SIGNUP_HEADER_RANGE, SIGNUP_HEADER)
     for row, col, value in cells:
         ws.set_cell(row, col, value)
     sheets = [ws]
@@ -1432,7 +1540,7 @@ def test_add_person_as_fl_parks_arrival_in_lowest_signup_capable_slot_and_logs()
     fl_label = service.add_person_as_fl("June 2026", "Kasper", intended_room="348")
 
     assert fl_label == "FL2"
-    assert ws.batch_updates == [[{"range": "B46", "values": [["Kasper"]]}, {"range": "I46", "values": [[0.0]]}]]
+    assert ws.batch_updates == [[{"range": "B57", "values": [["Kasper"]]}, {"range": "I57", "values": [[0.0]]}]]
     rows = _logged_rows(log_ws)
     assert len(rows) == 1
     assert rows[0][1] == "parked_fl"
@@ -1443,11 +1551,25 @@ def test_add_person_as_fl_parks_arrival_in_lowest_signup_capable_slot_and_logs()
     assert rows[0][10] == "348"
 
 
-def test_add_person_as_fl_distinguishes_missing_signup_capable_slot():
+def test_add_person_as_fl_uses_fl4_now_that_it_can_sign_up():
+    # FL4 and FL5 gained signup columns when LUKKET was replaced, so an arrival
+    # no longer runs out of room once FL1-FL3 are taken.
     ws, log_ws, service = _occupancy_sheet(
         [["FL1", "Gustav"], ["FL2", "Astrid"], ["FL3", "Esther"], ["FL4", ""], ["FL5", ""]],
         [[0.0], [0.0], [0.0], [0.0], [0.0]],
     )
+
+    assert service.add_person_as_fl("June 2026", "Kasper") == "FL4"
+
+
+def test_add_person_as_fl_distinguishes_missing_signup_capable_slot():
+    # A sheet whose signup header does not reach the free slot: the person
+    # would have an account but no way to sign up for dinner.
+    ws, log_ws, service = _occupancy_sheet(
+        [["FL1", "Gustav"], ["FL2", "Astrid"], ["FL3", "Esther"], ["FL4", ""], ["FL5", ""]],
+        [[0.0], [0.0], [0.0], [0.0], [0.0]],
+    )
+    ws.set_batch_get(constants.DAY_SHEET_SIGNUP_HEADER_RANGE, [["FL1", "FL2", "FL3"]])
 
     with pytest.raises(ValueError, match="signup-capable"):
         service.add_person_as_fl("June 2026", "Kasper")
@@ -1469,7 +1591,7 @@ def test_move_person_out_parks_debtor_in_highest_free_fl_and_logs():
     ws, log_ws, service = _occupancy_sheet(
         [["346", "Julia"], ["FL4", ""], ["FL5", ""]],
         [[-150.0], [0.0], [0.0]],
-        cells=[(45, 9, "-75,00 kr")],
+        cells=[(56, 9, "-75,00 kr")],
     )
 
     fl_label = service.move_person_out("June 2026", "346")
@@ -1477,10 +1599,10 @@ def test_move_person_out_parks_debtor_in_highest_free_fl_and_logs():
     assert fl_label == "FL5"
     assert ws.batch_updates == [
         [
-            {"range": "B45", "values": [[""]]},
-            {"range": "I45", "values": [[0.0]]},
-            {"range": "B47", "values": [["Julia"]]},
-            {"range": "I47", "values": [[-75.0]]},
+            {"range": "B56", "values": [[""]]},
+            {"range": "I56", "values": [[0.0]]},
+            {"range": "B58", "values": [["Julia"]]},
+            {"range": "I58", "values": [[-75.0]]},
         ]
     ]
     rows = _logged_rows(log_ws)
@@ -1496,13 +1618,13 @@ def test_move_person_out_with_zero_tab_just_clears_the_room():
     ws, log_ws, service = _occupancy_sheet(
         [["346", "Julia"], ["FL5", ""]],
         [[0.0], [0.0]],
-        cells=[(45, 9, 0.0)],
+        cells=[(56, 9, 0.0)],
     )
 
     fl_label = service.move_person_out("June 2026", "346")
 
     assert fl_label == ""
-    assert ws.batch_updates == [[{"range": "B45", "values": [[""]]}, {"range": "I45", "values": [[0.0]]}]]
+    assert ws.batch_updates == [[{"range": "B56", "values": [[""]]}, {"range": "I56", "values": [[0.0]]}]]
     rows = _logged_rows(log_ws)
     assert rows[0][1] == "moved_out"
     assert rows[0][8] == ""
@@ -1512,7 +1634,7 @@ def test_move_person_out_raises_when_no_fl_slot_free():
     ws, log_ws, service = _occupancy_sheet(
         [["346", "Julia"], ["FL5", "Gustav"]],
         [[-150.0], [0.0]],
-        cells=[(45, 9, "-75,00 kr")],
+        cells=[(56, 9, "-75,00 kr")],
     )
 
     with pytest.raises(ValueError, match="No FL slot is free at all"):
@@ -1525,7 +1647,7 @@ def test_move_person_between_accounts_logs_swap_rows_with_shared_action_id():
     ws, log_ws, service = _occupancy_sheet(
         [["346", "Julia"], ["347", "Johannes"]],
         [[0.0], [0.0]],
-        cells=[(45, 9, -75.0), (46, 9, 100.0)],
+        cells=[(56, 9, -75.0), (57, 9, 100.0)],
     )
 
     service.move_person_between_accounts("June 2026", "346", "347")
@@ -1556,7 +1678,7 @@ def test_replace_room_person_logs_moved_in_and_moved_out_pair():
     ws, log_ws, service = _occupancy_sheet(
         [["346", "Julia"], ["FL4", ""], ["FL5", ""]],
         [[100.0], [0.0], [0.0]],
-        cells=[(45, 9, 100.0)],
+        cells=[(56, 9, 100.0)],
     )
 
     fl_label = service.replace_room_person("June 2026", "346", "Kasper")
@@ -1573,7 +1695,7 @@ def test_occupancy_actions_succeed_when_log_sheet_is_missing():
     ws, _, service = _occupancy_sheet(
         [["346", "Julia"], ["FL5", ""]],
         [[-150.0], [0.0]],
-        cells=[(45, 9, -75.0)],
+        cells=[(56, 9, -75.0)],
         with_log=False,
     )
 

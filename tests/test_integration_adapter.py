@@ -1,11 +1,19 @@
+import os
 import shutil
 import tempfile
 from datetime import date
 
 import openpyxl
+import pytest
 
 from kitchenpal import constants
+from kitchenpal.sheets.utils import parse_month_sheet_name
 from kitchenpal.sheets_service import SheetsService
+
+# The fixture is a real export of the spreadsheet, so it carries roster data and
+# must be able to live outside this public repo. Point KITCHENPAL_TEST_SHEET at
+# it wherever it is kept; these tests skip when it is not there.
+TEST_SHEET_PATH = os.environ.get("KITCHENPAL_TEST_SHEET", "test_sheet.xlsx")
 
 
 class OpenpyxlWritableAdapter:
@@ -97,16 +105,30 @@ class FakeSpreadsheetAdapter:
 
 
 def _copy_test_sheet():
-    src = "test_sheet.xlsx"
+    if not os.path.exists(TEST_SHEET_PATH):
+        pytest.skip(f"sheet fixture not found at {TEST_SHEET_PATH}; set KITCHENPAL_TEST_SHEET")
     tmp = tempfile.NamedTemporaryFile(prefix="kitchenpal_test_", suffix=".xlsx", delete=False)
     tmp.close()
-    shutil.copy(src, tmp.name)
+    shutil.copy(TEST_SHEET_PATH, tmp.name)
     return tmp.name
+
+
+def _a_month_sheet(path):
+    """Any month sheet in the fixture — the export's months change over time."""
+    workbook = openpyxl.load_workbook(path, read_only=True)
+    try:
+        for title in workbook.sheetnames:
+            if parse_month_sheet_name(title) is not None:
+                return title
+    finally:
+        workbook.close()
+    raise AssertionError(f"no month sheet in {path}")
 
 
 def test_integration_add_purchase_and_drinks():
     tmp = _copy_test_sheet()
-    adapter = OpenpyxlWritableAdapter(tmp, "Maj 2026")
+    sheet_name = _a_month_sheet(tmp)
+    adapter = OpenpyxlWritableAdapter(tmp, sheet_name)
     fake_spreadsheet = FakeSpreadsheetAdapter(adapter)
 
     # build minimal SheetsService and inject fake spreadsheet
@@ -114,7 +136,7 @@ def test_integration_add_purchase_and_drinks():
     service._spreadsheet = fake_spreadsheet
 
     # Add a purchase - should write AC..AE and AG on first empty lookup row
-    service.add_purchase("Maj 2026", 352, date(2026, 5, 24), "Banankage", 42.0)
+    service.add_purchase(sheet_name, 352, date(2026, 5, 24), "Banankage", 42.0)
 
     # verify AC..AE and AG on the sheet by reading the adapter across a larger range
     rng = adapter.batch_get([f"{constants.PURCHASE_INSERT_START_COLUMN}2:{constants.PURCHASE_AMOUNT_COLUMN}300"])[0]
@@ -141,7 +163,7 @@ def test_integration_add_purchase_and_drinks():
     before_beer = adapter.cell(account_row, constants.PERSONAL_ACCOUNT_BEER_COLUMN).value or 0
     before_wine = adapter.cell(account_row, constants.PERSONAL_ACCOUNT_WINE_COLUMN).value or 0
 
-    service.add_drinks("Maj 2026", 346, 2, 1)
+    service.add_drinks(sheet_name, 346, 2, 1)
 
     after_beer = adapter.cell(account_row, constants.PERSONAL_ACCOUNT_BEER_COLUMN).value
     after_wine = adapter.cell(account_row, constants.PERSONAL_ACCOUNT_WINE_COLUMN).value
@@ -155,7 +177,8 @@ def test_integration_add_purchase_and_drinks():
 
 def test_integration_add_three_wines_increases_ak_row_three_by_three():
     tmp = _copy_test_sheet()
-    adapter = OpenpyxlWritableAdapter(tmp, "Maj 2026")
+    sheet_name = _a_month_sheet(tmp)
+    adapter = OpenpyxlWritableAdapter(tmp, sheet_name)
     fake_spreadsheet = FakeSpreadsheetAdapter(adapter)
 
     service = SheetsService.__new__(SheetsService)
@@ -168,7 +191,7 @@ def test_integration_add_three_wines_increases_ak_row_three_by_three():
     baseline = 4
     adapter.update_cell(3, constants.PERSONAL_ACCOUNT_WINE_COLUMN, baseline)
 
-    service.add_drinks("Maj 2026", 346, 0, 3)
+    service.add_drinks(sheet_name, 346, 0, 3)
 
     after_wine = adapter.cell(3, constants.PERSONAL_ACCOUNT_WINE_COLUMN).value
     assert int(after_wine) == baseline + 3

@@ -1,5 +1,6 @@
 from datetime import date
 
+from kitchenpal import constants
 from kitchenpal.ui.day_to_day import (
     _delete_confirmation_key,
     _english_month,
@@ -59,8 +60,8 @@ def test_purchase_date_for_edit_reads_iso_date():
 
 
 def test_range_row_helpers_read_a1_bounds():
-    assert _range_start_row("AC2:AC43") == 2
-    assert _range_end_row("AC2:AC43") == 43
+    assert _range_start_row(constants.PURCHASE_LOOKUP_RANGE) == 2
+    assert _range_end_row(constants.PURCHASE_LOOKUP_RANGE) == 33
 
 
 def test_next_available_row_finds_gap():

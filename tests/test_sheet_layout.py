@@ -16,7 +16,10 @@ def test_table_ranges_are_grouped_by_workflow():
     layout = constants.SHEET_LAYOUT
 
     assert layout.day.drink_table_range == "AI3:AK21"
-    assert layout.purchases.table_range == "AC3:AG43"
-    assert layout.transactions.table_range == "AC44:AG200"
     assert layout.personal_account.kovs_header_range == "A1:AZ1"
     assert layout.personal_account.transaction_total_range == "AG44:AG55"
+    # Purchases and kitchen fund payments are two blocks of the same columns,
+    # split by row. The row numbers themselves are pinned in
+    # test_transfer_purchase_layout.py.
+    assert layout.purchases.table_range != layout.transactions.table_range
+    assert layout.purchases.amount_column == layout.transactions.amount_column == "AG"

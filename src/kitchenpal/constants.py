@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from .a1 import range_end_row as _range_end_row, range_start_row as _range_start_row
+
 
 @dataclass(frozen=True)
 class PersonalAccountLayout:
@@ -11,6 +13,8 @@ class PersonalAccountLayout:
     account_cell: str
     table_range: str
     table_start_row: int
+    header_search_range: str
+    header_label: str
     kovs_header_range: str
     kovs_search_start_row: int
     kovs_search_end_row: int
@@ -54,33 +58,35 @@ SHEET_LAYOUT = SheetLayout(
     day=DaySheetLayout(
         day_offset=2,
         menu_column=4,
-        signup_header_range="I2:AA2",
+        signup_header_range="I2:AB2",
         drink_table_range="AI3:AK21",
     ),
     personal_account=PersonalAccountLayout(
         beer_column=36,
         wine_column=37,
-        balance_range="Z45:Z65",
-        previous_balance_range="I45:I65",
+        balance_range="Z56:Z76",
+        previous_balance_range="I56:I76",
         previous_balance_column=9,
         account_cell="AG37",
-        table_range="A45:B65",
-        table_start_row=45,
+        table_range="A56:B76",
+        table_start_row=56,
+        header_search_range="A44:B70",
+        header_label="Navn",
         kovs_header_range="A1:AZ1",
         kovs_search_start_row=3,
         kovs_search_end_row=300,
         transaction_total_range="AG44:AG55",
     ),
     purchases=TransactionTableLayout(
-        lookup_range="AC2:AC43",
-        table_range="AC3:AG43",
+        lookup_range="AC2:AC33",
+        table_range="AC3:AG33",
         insert_start_column="AC",
         insert_end_column="AE",
         amount_column="AG",
     ),
     transactions=TransactionTableLayout(
         lookup_range="AC44:AC55",
-        table_range="AC44:AG200",
+        table_range="AC44:AG55",
         insert_start_column="AC",
         insert_end_column="AE",
         amount_column="AG",
@@ -107,6 +113,8 @@ PERSONAL_ACCOUNT_PREVIOUS_BALANCE_COLUMN = SHEET_LAYOUT.personal_account.previou
 PERSONAL_ACCOUNT_SHEET_ACCOUNT_CELL = SHEET_LAYOUT.personal_account.account_cell
 PERSONAL_ACCOUNT_TABLE_RANGE = SHEET_LAYOUT.personal_account.table_range
 PERSONAL_ACCOUNT_TABLE_START_ROW = SHEET_LAYOUT.personal_account.table_start_row
+PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE = SHEET_LAYOUT.personal_account.header_search_range
+PERSONAL_ACCOUNT_HEADER_LABEL = SHEET_LAYOUT.personal_account.header_label
 PERSONAL_ACCOUNT_KOVS_HEADER_RANGE = SHEET_LAYOUT.personal_account.kovs_header_range
 PERSONAL_ACCOUNT_KOVS_SEARCH_START_ROW = SHEET_LAYOUT.personal_account.kovs_search_start_row
 PERSONAL_ACCOUNT_KOVS_SEARCH_END_ROW = SHEET_LAYOUT.personal_account.kovs_search_end_row
@@ -125,6 +133,12 @@ TRANSACTION_TABLE_RANGE = SHEET_LAYOUT.transactions.table_range
 TRANSACTION_INSERT_START_COLUMN = SHEET_LAYOUT.transactions.insert_start_column
 TRANSACTION_INSERT_END_COLUMN = SHEET_LAYOUT.transactions.insert_end_column
 TRANSACTION_AMOUNT_COLUMN = SHEET_LAYOUT.transactions.amount_column
+
+# How many rows each table actually has. The sheet's own balance formulas sum
+# exactly these rows (Indkøb = SUMIF($AC$3:$AC$33), Indbetalt/udbetalt =
+# SUMIF($AC$44:$AC$55)), so a row written past them never reaches a balance.
+PURCHASE_ROW_CAPACITY = _range_end_row(PURCHASE_TABLE_RANGE, 33) - _range_start_row(PURCHASE_TABLE_RANGE, 3) + 1
+TRANSACTION_ROW_CAPACITY = _range_end_row(TRANSACTION_TABLE_RANGE, 55) - _range_start_row(TRANSACTION_TABLE_RANGE, 44) + 1
 
 PLANNING_SHEET_NAME = SHEET_LAYOUT.planning.sheet_name
 PLANNING_HEADER_RANGE = SHEET_LAYOUT.planning.header_range

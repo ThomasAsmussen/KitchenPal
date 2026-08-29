@@ -22,11 +22,13 @@ from ..constants import (
     PURCHASE_INSERT_END_COLUMN,
     PURCHASE_INSERT_START_COLUMN,
     PURCHASE_LOOKUP_RANGE,
+    PURCHASE_ROW_CAPACITY,
     PURCHASE_TABLE_RANGE,
     TRANSACTION_AMOUNT_COLUMN,
     TRANSACTION_INSERT_END_COLUMN,
     TRANSACTION_INSERT_START_COLUMN,
     TRANSACTION_LOOKUP_RANGE,
+    TRANSACTION_ROW_CAPACITY,
     TRANSACTION_TABLE_RANGE,
 )
 from .models import DaySummary, DayToDayEntries, DrinkEntry, PersonalAccountEntry, PurchaseEntry, RoomEntry, TransactionEntry
@@ -170,23 +172,29 @@ class DayToDaySheetsMixin:
     def add_purchase(self, worksheet_name: str, room_number: int | str, purchase_date: date, item: str, cost: float):
         worksheet = self.get_worksheet(worksheet_name)
         rows = worksheet.batch_get([PURCHASE_LOOKUP_RANGE])[0]
+        start_row = _range_start_row(PURCHASE_LOOKUP_RANGE, 2)
+        last_row = _range_end_row(PURCHASE_TABLE_RANGE, 33)
+
         target_row = None
-        for index, cell in enumerate(rows, start=2):
-            if not cell:
+        for index, cell in enumerate(rows, start=start_row):
+            # gspread trims an empty row to [], the openpyxl test adapter gives
+            # back [None] — both mean the row is free.
+            if not _row_has_content(cell):
                 target_row = index
                 break
-
         if target_row is None:
-            # If the lookup range is full, pick the first row after the lookup.
-            # Try to expand the worksheet if supported; otherwise raise.
-            start_row = _range_start_row(PURCHASE_LOOKUP_RANGE, 2)
-            desired_row = start_row + len(rows)
-            if hasattr(worksheet, "row_count") and hasattr(worksheet, "add_rows"):
-                if desired_row > worksheet.row_count:
-                    worksheet.add_rows(desired_row - worksheet.row_count)
-                target_row = desired_row
-            else:
-                raise ValueError(f"No available purchase rows in {PURCHASE_LOOKUP_RANGE}")
+            # Trailing empty rows are trimmed off the read, so the first free
+            # row is the one after the block that came back.
+            target_row = start_row + len(rows)
+
+        if target_row > last_row:
+            # Never write past the table: the sheet's Indkøb formula only sums
+            # AC3:AG33, and the rows below hold the STATUS box.
+            raise ValueError(
+                f"The purchase table in {worksheet_name} is full "
+                f"({PURCHASE_ROW_CAPACITY} of {PURCHASE_ROW_CAPACITY} rows used). "
+                "Edit or delete a purchase, or ask an admin to make the table longer."
+            )
 
         updates = [
             {
@@ -299,7 +307,7 @@ class DayToDaySheetsMixin:
         cost: float,
     ):
         if row_number < _range_start_row(PURCHASE_TABLE_RANGE, 3) or row_number > _range_end_row(
-            PURCHASE_TABLE_RANGE, 43
+            PURCHASE_TABLE_RANGE, 33
         ):
             raise ValueError("Purchase row must be in the purchase section")
 
@@ -318,7 +326,7 @@ class DayToDaySheetsMixin:
 
     def delete_purchase(self, worksheet_name: str, row_number: int):
         if row_number < _range_start_row(PURCHASE_TABLE_RANGE, 3) or row_number > _range_end_row(
-            PURCHASE_TABLE_RANGE, 43
+            PURCHASE_TABLE_RANGE, 33
         ):
             raise ValueError("Purchase row must be in the purchase section")
 
@@ -420,23 +428,23 @@ class DayToDaySheetsMixin:
         range_values = worksheet.batch_get([TRANSACTION_LOOKUP_RANGE])[0]
 
         start_row = _range_start_row(TRANSACTION_LOOKUP_RANGE, 44)
+        last_row = _range_end_row(TRANSACTION_TABLE_RANGE, 55)
 
         target_row = None
         for index, current_cell in enumerate(range_values):
-            if not current_cell:
+            if not _row_has_content(current_cell):
                 target_row = start_row + index
                 break
-
         if target_row is None:
-            # If lookup is full, append after the lookup. Try to expand the
-            # worksheet if supported; otherwise preserve previous behavior and raise.
-            desired_row = start_row + len(range_values)
-            if hasattr(worksheet, "row_count") and hasattr(worksheet, "add_rows"):
-                if desired_row > worksheet.row_count:
-                    worksheet.add_rows(desired_row - worksheet.row_count)
-                target_row = desired_row
-            else:
-                raise ValueError(f"No available transaction rows in {TRANSACTION_LOOKUP_RANGE}")
+            target_row = start_row + len(range_values)
+
+        if target_row > last_row:
+            # The Indbetalt/udbetalt formula only sums AC44:AG55.
+            raise ValueError(
+                f"The kitchen fund payment table in {worksheet_name} is full "
+                f"({TRANSACTION_ROW_CAPACITY} of {TRANSACTION_ROW_CAPACITY} rows used). "
+                "Edit or delete a payment, or ask an admin to make the table longer."
+            )
 
         updates = [
             {
