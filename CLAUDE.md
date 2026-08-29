@@ -100,14 +100,19 @@ on a personal screen:
   navigation collapses into a hamburger on a phone, which is the hiding we are
   ending. Read the docstring in ui/nav.py before touching that CSS — the bar is
   matched with `.st-key-kpalnav` exactly, never `[class*=]`.
-- Two things the bar has to survive on a real phone, both measured rather than
-  guessed. Community Cloud floats its own badge in the bottom-right corner,
-  exactly over the House tab: its classes are hashed and change between Cloud
-  releases, so the CSS casts wide (known test ids, badge-ish class fragments,
-  and any element appended straight to <body> — safe because with a dialog and a
-  popover open this app's <body> still holds only <noscript> and <div id=root>).
-  The bar also sits at the maximum z-index, which is the part that does not
-  depend on guessing a name: a badge nobody predicted still loses. And below 400px Streamlit sets
+- Community Cloud serves the app inside <iframe title="streamlitApp"> and floats
+  two controls in the HOST page beside it: ._viewerBadge_* (fixed, z-index 50)
+  and ._profileContainer_* (fixed, z-index 40). Inspected on the live app at
+  390x820 they cover x=253..390, y=774..820 — exactly the House tab. They CANNOT
+  be hidden or out-ranked from in here: they are in the document that contains
+  ours, so our selectors never match them and our z-index, however large, is
+  confined to the iframe. Three attempts failed for that one reason before it
+  was measured; measure the DOM before writing CSS against someone else's
+  chrome. The fix is to stop putting anything important under them — below 640px
+  the bar's bottom padding lifts the tab row 46px, so all four tabs clear them
+  and the strip they land on is empty bar background. Hosting the app anywhere
+  that does not inject them removes both, with no change to this code.
+  And below 400px Streamlit sets
   `padding-top: 2.2rem !important` on the main container with the SAME selector
   we use, which put the identity chip's ascenders behind the 60px header. An
   identical selector only ties and loses on order, so ours carries an extra

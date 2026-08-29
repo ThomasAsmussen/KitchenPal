@@ -57,6 +57,20 @@ def page_styles(active_slug: str) -> str:
     padding-bottom: calc(5.6rem + env(safe-area-inset-bottom)) !important;
   }}
 
+  /* The host's two floating controls are 46px tall and sit on the bottom edge.
+     Lift the tabs above them rather than squeezing four tabs into the 253px to
+     their left: the bar keeps its full width and its symmetry, and the strip
+     they land on is empty bar background. Delete this the day the app is hosted
+     somewhere that does not float anything over it. */
+  @media (max-width: 640px) {{
+    .st-key-kpalnav {{
+      padding-bottom: calc(.3rem + 46px + env(safe-area-inset-bottom)) !important;
+    }}
+    [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {{
+      padding-bottom: calc(5.6rem + 46px + env(safe-area-inset-bottom)) !important;
+    }}
+  }}
+
   /* Streamlit's header is 60px tall, absolutely positioned and painted over the
      page. Below 400px Streamlit itself drops the main container's top padding to
      2.2rem — 35px — so the first thing on every screen, the identity chip, loses
@@ -72,13 +86,19 @@ def page_styles(active_slug: str) -> str:
     }}
   }}
 
-  /* Streamlit Community Cloud floats its own badge in the bottom-right corner,
-     exactly over the House tab. Its class names are hashed and change between
-     Cloud releases, so this casts wide: the known test ids, anything whose class
-     mentions a badge or the manage button, and any element appended straight to
-     <body>. That last one is safe here — with a dialog and a popover open, this
-     app's <body> still holds only <noscript> and <div id="root">, because
-     Streamlit portals inside its own root. */
+  /* Community Cloud serves the app inside <iframe title="streamlitApp"> and
+     floats two of its own controls in the HOST page beside it: the viewer badge
+     (._viewerBadge_*, fixed, z-index 50) and the profile pill
+     (._profileContainer_*, fixed, z-index 40). Measured on the live app at
+     390x820 they cover x=253..390, y=774..820 — exactly the House tab.
+
+     Nothing in here can touch them. They are in the document that CONTAINS
+     ours, so hiding them needs a selector we cannot apply and out-ranking them
+     is impossible at any z-index: ours is confined to the iframe. The rules
+     below stay only for a future host that injects into our own document.
+
+     What we can do is stop putting anything important under them, which is the
+     media query further down. */
   [data-testid="stStatusWidget"],
   [data-testid="manage-app-button"],
   [data-testid="stAppViewBadge"],
