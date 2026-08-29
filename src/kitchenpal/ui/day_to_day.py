@@ -356,10 +356,11 @@ def _short_day(worksheet_name: str, day: int) -> str:
     return f"{weekday[:3]} {day}" if weekday else str(day)
 
 
-def _dinner_line(text: str, note: str, *, dim: bool = False, strong: bool = False) -> None:
+def _dinner_line(text: str, note: str, *, dim: bool = False, strong: bool = False, tone: str = "") -> None:
     classes = "kp-line" + (" kp-past" if dim else "") + (" kp-mine" if strong else "")
+    note_classes = "kp-note" + (f" {tone}" if tone else "")
     st.markdown(
-        f'<div class="{classes}"><span>{text}</span><span class="kp-note">{note}</span></div>',
+        f'<div class="{classes}"><span>{text}</span><span class="{note_classes}">{note}</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -406,6 +407,7 @@ def render_dinner_view(service: SheetsService):
     )
 
     _render_dinner_card(row)
+    _render_cook_controls(service, context, sheet_name, selected_day, row, room)
     _render_signup_controls(service, context, sheet_name, selected_day, row, room)
     _render_other_day_picker(service, sheet_name, days, selected_day, rows, room)
 
@@ -452,6 +454,68 @@ def render_dinner_view(service: SheetsService):
         render_dish_form(service, context, selected_day, row)
     elif st.button("Add the menu for this dinner", type="tertiary", key=f"dish_for_{sheet_name}_{selected_day}"):
         _dish_dialog(service, context, selected_day, row)
+
+
+def _take_dinner(service, sheet_name: str, day: int, label: str, name: str) -> None:
+    try:
+        service.claim_dinner(sheet_name, day, label, by=label)
+    except ValueError as exc:
+        st.session_state[_signup_error_key(sheet_name, day)] = user_error_message(
+            exc, "Could not put you down to cook"
+        )
+        return
+    data.clear_dinners()
+    st.toast(f"{name} is cooking on the {day}{_ordinal(day)}.")
+
+
+@st.dialog("Who is cooking?")
+def _cook_dialog(service, context, sheet_name: str, day: int) -> None:
+    people = [
+        entry
+        for entry in context.signup_room_entries
+        if is_occupied_account(entry.label, entry.name)
+    ]
+    if not people:
+        st.caption("Nobody on this sheet can be put down to cook.")
+        return
+    chosen = st.selectbox(
+        "Who is cooking?",
+        people,
+        format_func=lambda entry: entry.name or entry.label,
+        key=f"cook_who_{sheet_name}_{day}",
+    )
+    if st.button("Put them down", type="primary", use_container_width=True, key=f"cook_go_{sheet_name}_{day}"):
+        _take_dinner(service, sheet_name, day, chosen.label, chosen.name or chosen.label)
+        st.rerun()
+
+
+def _render_cook_controls(service, context, sheet_name: str, day: int, row, room: str) -> None:
+    """A night nobody has taken should not be a dead end.
+
+    Taking it yourself is the common case and stays one tap; putting somebody
+    else down is the same action with a picker in front of it.
+    """
+    if row.chef:
+        return
+    if is_current_month(sheet_name) and day < _default_day_for_sheet(sheet_name):
+        return
+
+    if room and st.button(
+        "I'll cook this dinner",
+        icon=":material/skillet:",
+        use_container_width=True,
+        key=f"cook_mine_{sheet_name}_{day}",
+    ):
+        _take_dinner(service, sheet_name, day, room, "You")
+        st.rerun()
+    st.button(
+        "Someone else is cooking",
+        type="tertiary",
+        use_container_width=True,
+        key=f"cook_other_{sheet_name}_{day}",
+        on_click=_cook_dialog,
+        args=(service, context, sheet_name, day),
+    )
 
 
 def _render_dinner_card(row) -> None:
@@ -560,7 +624,7 @@ def _render_other_day_picker(service, sheet_name, days, selected_day, rows, room
     """
     parsed = parse_month_sheet_name(sheet_name)
     if parsed is None:
-        with st.expander("Another day"):
+        with st.expander("Choose day"):
             render_month_picker(service)
             st.selectbox("Day", days, index=days.index(selected_day), key=DINNER_DAY_KEY)
         return
@@ -580,7 +644,7 @@ def _render_other_day_picker(service, sheet_name, days, selected_day, rows, room
         # somebody has.
         return "cook" if chef_by_day.get(day) else "free"
 
-    with st.expander("Another day"):
+    with st.expander("Choose day"):
         render_grid(
             key=f"dinnerday_{sheet_name}",
             year=year,
@@ -714,12 +778,12 @@ def render_dish_form(service: SheetsService, context: DayToDayContext, selected_
 
 
 STATEMENT_LABELS = {
-    "carried_in": "Carried in from last month",
+    "carried_in": "Balance from last month",
     "dinners": "Dinners eaten",
     "cooked": "Dinners you cooked",
     "drinks": "Drinks",
     "purchases": "Shared purchases you paid for",
-    "payments": "Paid in or out",
+    "payments": "Kitchen fund payments",
     "dues": "Monthly dues",
     "interest": "Interest",
 }
@@ -730,7 +794,7 @@ def _balance_sentence(balance: float) -> str:
     if balance < 0:
         return f"You owe the kitchen fund {_format_amount_dkk(abs(balance))}."
     if balance > 0:
-        return "The kitchen fund is holding this for you."
+        return "The kitchen fund owes you this."
     return "You are square with the kitchen fund."
 
 
@@ -760,8 +824,14 @@ def statement_detail(key: str, *, day_rows, room: str, drinks, purchases) -> str
 
 def _render_statement(statement, *, day_rows, room, drinks, purchases) -> None:
     with st.container(border=True):
+        # Red when you owe, green when you are owed: the one number people open
+        # this tab for should not need reading to know which way it points.
+        tone = "kp-owed" if statement.balance < 0 else ("kp-good" if statement.balance > 0 else "")
         st.markdown('<div class="kp-kicker">Your balance</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="kp-money">{_format_amount_dkk(statement.balance)}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="kp-money {tone}">{_format_amount_dkk(statement.balance)}</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(f'<div class="kp-note">{_balance_sentence(statement.balance)}</div>', unsafe_allow_html=True)
 
     lines = [(key, statement.components.get(key, 0.0)) for key in STATEMENT_ORDER]
@@ -775,7 +845,11 @@ def _render_statement(statement, *, day_rows, room, drinks, purchases) -> None:
         detail = statement_detail(key, day_rows=day_rows, room=room, drinks=drinks, purchases=purchases)
         text = STATEMENT_LABELS[key] + (f" · {detail}" if detail else "")
         sign = "+" if amount > 0 else "−"
-        _dinner_line(text, f"{sign}{_format_amount_dkk(abs(amount))}")
+        _dinner_line(
+            text,
+            f"{sign}{_format_amount_dkk(abs(amount))}",
+            tone="kp-good" if amount > 0 else "kp-owed",
+        )
 
 
 @st.dialog("Add drinks")
@@ -1138,7 +1212,7 @@ def render_me_view(service: SheetsService):
 
         _render_my_rows(service, context, room)
 
-    with st.expander("Another month"):
+    with st.expander("Choose month"):
         render_month_picker(service)
 
 

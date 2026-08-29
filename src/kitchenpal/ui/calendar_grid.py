@@ -60,6 +60,27 @@ def render_grid(
                         )
 
 
+def render_static_grid(*, year: int, month: int, day_state) -> None:
+    """The same month, read-only: plain HTML rather than 31 dead buttons.
+
+    An answer you have already given is a picture, not a form. Drawing it as
+    markup keeps the colours honest (a disabled Streamlit button greys its own
+    text) and drops thirty-one widgets from a screen that only has to be read.
+    """
+    cells = [f"<div class='kpal-s-wd'>{_weekday_label(name)}</div>" for name in ENGLISH_WEEKDAY_NAMES]
+    for week in calendar.Calendar(firstweekday=0).monthdayscalendar(year, month):
+        for day in week:
+            if day == 0:
+                cells.append("<div class='kpal-s-blank'></div>")
+                continue
+            state = day_state(day)
+            if not state:
+                cells.append(f"<div class='kpal-s-day kpal-s-off'>{day}</div>")
+                continue
+            cells.append(f"<div class='kpal-s-day kpal-s-{state}'>{day}</div>")
+    st.markdown(f"<div class='kpal-static'>{''.join(cells)}</div>", unsafe_allow_html=True)
+
+
 def grid_styles(dark: bool) -> str:
     line = "rgba(255,255,255,.14)" if dark else "rgba(20,32,30,.13)"
     muted = "#8B9895" if dark else "#6C7A77"
@@ -113,6 +134,34 @@ def grid_styles(dark: bool) -> str:
   /* "free" keeps the plain outline — a night nobody has taken. */
   [class*="st-key-kpalday_here_"] button {{ border-color: {mine_bg} !important; border-width: 2px !important; }}
   [class*="st-key-kpalday_here_"] button p {{ font-weight: 600; }}
+
+  /* the read-only month: same colours, no widgets */
+  .kpal-static {{
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: .22rem;
+    margin: .2rem 0 .1rem;
+    /* square cells would balloon to 100px on a desktop column */
+    max-width: 23rem;
+  }}
+  .kpal-s-wd {{
+    text-align: center; font-size: .64rem; font-weight: 600;
+    letter-spacing: .04em; color: {muted}; padding-bottom: .1rem;
+  }}
+  .kpal-s-blank {{ aspect-ratio: 1 / 1; }}
+  .kpal-s-day {{
+    aspect-ratio: 1 / 1;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid {line}; border-radius: 8px;
+    font-size: .8rem; font-variant-numeric: tabular-nums; color: {ink};
+  }}
+  .kpal-s-off {{ border-color: transparent; color: {muted}; opacity: .4; }}
+  .kpal-s-can {{ background: {can_bg}; border-color: transparent; }}
+  .kpal-s-cant {{
+    background: {cant_bg}; border-color: transparent;
+    color: {cant_ink}; text-decoration: line-through;
+  }}
+  .kpal-s-pref {{ background: {pref_bg}; border-color: transparent; color: {pref_ink}; font-weight: 600; }}
 
   .kpal-legend {{
     display: flex; flex-wrap: wrap; gap: .4rem .9rem;

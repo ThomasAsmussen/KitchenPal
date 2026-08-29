@@ -258,6 +258,50 @@ class DayToDaySheetsMixin:
         worksheet.batch_update(updates)
         return row_number
 
+    def claim_dinner(self, worksheet_name: str, day: int, room_label: str, by: str = "") -> None:
+        """Put somebody down to cook on a night nobody has taken.
+
+        Separate from swap_dinner because it is a different event: nothing is
+        being traded, and refusing when the night already has a cook is the
+        point — two people quietly overwriting each other is exactly what a
+        shared sheet makes easy.
+        """
+        label = str(room_label).strip()
+        if not label:
+            raise ValueError("Choose who is cooking.")
+
+        first_row = 1 + DAY_SHEET_DAY_OFFSET
+        chef_column = rowcol_to_a1(1, DAY_SHEET_CHEF_COLUMN)[:-1]
+        rows = self.get_worksheet(worksheet_name).batch_get(
+            [f"{chef_column}{first_row}:{chef_column}{DAY_SHEET_LAST_DAY_ROW}"]
+        )[0]
+        index = day - 1
+        current = ""
+        if 0 <= index < len(rows):
+            current = _format_room_label((list(rows[index]) + [""])[0])
+        if current:
+            raise ValueError(
+                f"{current} is already cooking on the {ordinal(day)} — swap with them instead."
+            )
+
+        worksheet = self.get_worksheet(worksheet_name)
+        worksheet.batch_update(
+            [{"range": rowcol_to_a1(day + DAY_SHEET_DAY_OFFSET, DAY_SHEET_CHEF_COLUMN), "values": [[label]]}]
+        )
+        self._log_safely(
+            [
+                LogEntry(
+                    event="took_dinner",
+                    summary=f"{label} took the dinner on the {ordinal(day)}.",
+                    action_id=self._new_action_id(),
+                    month_sheet=worksheet_name,
+                    by=by,
+                    person=label,
+                    to_label=str(day),
+                )
+            ]
+        )
+
     def swap_dinner(
         self,
         worksheet_name: str,

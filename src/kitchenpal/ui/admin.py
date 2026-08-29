@@ -126,7 +126,7 @@ def _rollover_month() -> tuple[str, int]:
 
 def _render_month_picker() -> None:
     default_year = rollover.next_month()[1]
-    with st.expander("Another month"):
+    with st.expander("Choose month"):
         st.selectbox("Month", ENGLISH_MONTHS, key="admin_month")
         st.selectbox("Year", [default_year - 1, default_year, default_year + 1], key="admin_year")
 
@@ -740,7 +740,7 @@ def _roster_sheet_name(service: SheetsService, month_name: str, year: int) -> st
 
 def _render_roster_month_picker(service: SheetsService) -> None:
     sheets = _month_sheet_names(data.sheet_names(service))
-    with st.expander("Another month"):
+    with st.expander("Choose month"):
         st.selectbox("Month sheet", sheets, key="admin_roster_sheet")
 
 

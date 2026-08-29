@@ -37,7 +37,7 @@ from .month_setup import (
     format_days,
     parse_entry_days,
 )
-from .calendar_grid import render_grid
+from .calendar_grid import render_grid, render_static_grid
 
 CAN, CANT, PREF = "can", "cant", "pref"
 _NEXT_STATE = {CAN: CANT, CANT: PREF, PREF: CAN}
@@ -175,23 +175,32 @@ def _cannot_at_all(states: dict[int, str], possible_days) -> bool:
 
 
 def render_answer_summary(context: PlanningContext, states: dict[int, str], limit_one_day: bool) -> None:
-    """What you said, in words. The question this tab is asked after answering."""
+    """What you said, as the picture you drew.
+
+    Three sentences carrying lists of a dozen dates each is how this read
+    before: accurate and unreadable. The answer IS a calendar, so it is shown
+    as one, with a single line of prose above it for the shape of it.
+    """
     days = entry_days(states, context.possible_days)
     total = len(context.possible_days)
+    possible = set(context.possible_days)
 
     if not days["available"]:
-        _dinner_line("You can't cook at all this month", "✕")
+        headline = "You can't cook at all this month"
     else:
-        _dinner_line(f"You can cook on {len(days['available'])} of {total} dinner days", "")
-        st.caption(day_list(days["available"]))
-
-    if days["preferred"]:
-        _dinner_line(f"You would like {day_list(days['preferred'])}", "★")
-        st.caption("The schedule tries these first.")
-    if days["unavailable"] and days["available"]:
-        _dinner_line(f"You can't on {day_list(days['unavailable'])}", "✕")
+        headline = f"You can cook on {len(days['available'])} of {total} dinner days"
+        if days["preferred"]:
+            headline += f" · {len(days['preferred'])} you would like"
+    st.markdown(f'<div class="kp-money kp-small">{headline}</div>', unsafe_allow_html=True)
     if limit_one_day:
-        _dinner_line("At most once this month", "")
+        st.caption("At most once this month.")
+
+    render_static_grid(
+        year=context.year,
+        month=context.month,
+        day_state=lambda day: states.get(day, CAN) if day in possible else "",
+    )
+    _render_legend()
 
 
 def render_schedule_card(service: SheetsService, context: PlanningContext, room_entry, states) -> bool:
@@ -275,7 +284,6 @@ def render_planning_view(service: SheetsService) -> None:
     if editing:
         _render_editor(service, context, room_entry, states_key, stored, answered, on_the_rota)
     else:
-        st.markdown("###### Your answer")
         render_answer_summary(context, states, bool(stored and stored.limit_one_day))
         st.button(
             "Change my answer",

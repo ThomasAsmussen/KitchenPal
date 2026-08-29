@@ -42,7 +42,7 @@ SECTIONS = [
 
 
 def _balance_row(name: str, amount: float, *, mine: bool) -> None:
-    tone = "kp-owed" if amount < 0 else "kp-credit"
+    tone = "kp-owed" if amount < 0 else ("kp-good" if amount > 0 else "kp-credit")
     classes = "kp-line" + (" kp-mine" if mine else "")
     st.markdown(
         f'<div class="{classes}"><span>{name}</span>'
@@ -163,5 +163,5 @@ def render_house_view(service: SheetsService) -> None:
     # keeps its own, and a second picker beside it just poses a question with no
     # answer.
     if slug not in ("admin", "ideas"):
-        with st.expander("Another month"):
+        with st.expander("Choose month"):
             render_month_picker(service)

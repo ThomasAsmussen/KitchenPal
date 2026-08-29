@@ -56,6 +56,7 @@ def page_styles(active_slug: str) -> str:
     hover = "rgba(110,207,194,.14)" if dark else "rgba(14,81,76,.09)"
     shadow = "0 -2px 18px rgba(0,0,0,.45)" if dark else "0 -2px 14px rgba(20,32,30,.08)"
     bad = "#E28A7C" if dark else "#A33A2C"
+    good = "#5FBF9B" if dark else "#1F7A5A"
     page_bg = "#0E1117" if dark else "#FFFFFF"
 
     grid = grid_styles(dark)
@@ -182,6 +183,7 @@ def page_styles(active_slug: str) -> str:
   .kp-line > span:first-child {{ min-width: 0; }}
   .kp-past {{ opacity: .55; }}
   .kp-owed {{ color: {bad} !important; }}
+  .kp-good {{ color: {good} !important; }}
   .kp-credit {{ color: {idle} !important; }}
   .kp-clamp {{
     display: -webkit-box;

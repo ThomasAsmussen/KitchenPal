@@ -962,6 +962,25 @@ def _swap_sheet(chefs):
     return ws
 
 
+def test_claim_dinner_puts_somebody_on_a_free_night():
+    ws = _swap_sheet(["", "", "352"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    service.claim_dinner("June 2026", 1, "346")
+
+    assert ws.batch_updates == [[{"range": "C3", "values": [["346"]]}]]
+
+
+def test_claim_dinner_refuses_a_night_someone_already_has():
+    # Two people quietly overwriting each other is what a shared sheet makes easy.
+    ws = _swap_sheet(["350", "", "352"])
+    service = build_service(FakeSpreadsheet([ws]))
+
+    with pytest.raises(ValueError, match="already cooking on the 1st"):
+        service.claim_dinner("June 2026", 1, "346")
+    assert ws.batch_updates == []
+
+
 def test_swap_dinner_hands_a_night_over():
     ws = _swap_sheet(["346", "", "352"])
     service = build_service(FakeSpreadsheet([ws]))

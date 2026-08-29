@@ -89,7 +89,7 @@ def _planning_month(service: SheetsService, *, show_picker: bool):
         st.session_state[year_key] = next_month_date.year
 
     if show_picker:
-        with st.expander("Another month"):
+        with st.expander("Choose month"):
             st.selectbox("Month", ENGLISH_MONTHS, key=month_key)
             st.selectbox("Year", [next_month_date.year - 1, next_month_date.year, next_month_date.year + 1], key=year_key)
     return st.session_state[month_key], int(st.session_state[year_key])

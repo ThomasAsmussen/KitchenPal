@@ -150,6 +150,21 @@ on a personal screen:
 - UI language: English interface, Danish content left as residents typed it, one word
   per concept — dinner, host, signup, drinks, shared purchase, kitchen fund, balance.
   Never "food club" or "madklub" in the interface.
+- Money carries its direction in colour: kp-good (green) when the fund owes you,
+  kp-owed (red) when you owe it, on the balance itself, on every line of the
+  statement, and in House's list. It is the one number people open the app for.
+- Controls say what they do: "Choose month", not "Another month"; "Kitchen fund
+  payments", not "Paid in or out"; "Balance from last month", not "Carried in".
+- A night nobody has taken is not a dead end — Dinner offers "I'll cook this
+  dinner" (one tap, the common case) and "Someone else is cooking" behind a
+  picker. service.claim_dinner refuses a night that already has a cook and says
+  to swap instead; two people overwriting each other is what a shared sheet
+  makes easy.
+- An answer already given is a picture, not a form: Plan's answered view draws
+  the month with render_static_grid — plain markup, no widgets, because a
+  disabled Streamlit button greys its own text and thirty-one of them on a
+  read-only screen is waste. Three sentences carrying a dozen dates each was
+  accurate and unreadable.
 
 # The month turns by itself (2026-08-29)
 
