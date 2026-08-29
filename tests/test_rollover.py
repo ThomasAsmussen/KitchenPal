@@ -160,6 +160,33 @@ def test_the_turn_does_nothing_once_the_month_is_open():
     assert service.copied == []
 
 
+class _BrokenLog(_Stub):
+    def get_log_entries(self):
+        raise RuntimeError("Quota exceeded for reads")
+
+
+def test_an_unreadable_log_never_triggers_a_turn():
+    # This is how one month gets opened five times: a read fails, the app reads
+    # "no rolled_over row" as "not open yet", and carries the balances again.
+    service = _BrokenLog()
+
+    assert rollover.turn_if_due(service, today=SEPTEMBER) is None
+    assert service.copied == []
+    assert rollover.month_status(service, "September", 2026).log_unreadable is True
+
+
+def test_the_automatic_turn_runs_at_most_once_per_month():
+    service = _Stub()
+
+    assert rollover.turn_if_due(service, today=SEPTEMBER) is not None
+    assert service.copied == [("September", 2026)]
+
+    # Even if the Log write did not take, the app must not keep carrying.
+    service.log = []
+    assert rollover.turn_if_due(service, today=SEPTEMBER) is None
+    assert service.copied == [("September", 2026)]
+
+
 def test_a_failed_turn_is_remembered_and_not_retried_at_once():
     service = _Stub(fail_copy="Cannot update September 2026: previous month sheet does not exist.")
 

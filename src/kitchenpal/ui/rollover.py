@@ -68,6 +68,7 @@ class MonthStatus:
     turned_at: str = ""
     nothing_to_carry: bool = False
     error: str = ""
+    log_unreadable: bool = False
 
     @property
     def turned_early(self) -> bool:
@@ -145,6 +146,7 @@ def month_status(service: SheetsService, month_name: str, year: int) -> MonthSta
         month_name=month_name,
         year=year,
         sheet_name=sheet_name,
+        log_unreadable=bool(sheet_name) and read_log(service) is None,
         turned_at=turned_at(service, sheet_name) if sheet_name else "",
         # The house's first month has nothing behind it to carry.
         nothing_to_carry=bool(sheet_name) and previous_sheet_name(service, month_name, year) is None,
@@ -199,12 +201,23 @@ def same_month_sheet(logged: object, sheet_name: str) -> bool:
     return str(logged or "").strip().casefold() == str(sheet_name or "").strip().casefold()
 
 
-def _has_log_event(service: SheetsService, sheet_name: str, events: tuple[str, ...]) -> str:
+def read_log(service: SheetsService):
+    """The Log, or None when it could not be read at all.
+
+    None and [] are not the same answer and must never be confused: an empty Log
+    means the month has not been opened, while an unreadable one means we do not
+    know — and acting on "we do not know" is what makes the app carry the
+    balances again on a sheet that was already carried.
+    """
     try:
-        entries = data.log_entries(service)
-    except Exception:  # noqa: BLE001 - no Log is not proof of anything
-        return ""
-    for entry in entries:
+        return list(data.log_entries(service))
+    except Exception:  # noqa: BLE001 - a read that failed is not an answer
+        return None
+
+
+def _has_log_event(service: SheetsService, sheet_name: str, events: tuple[str, ...]) -> str:
+    entries = read_log(service)
+    for entry in entries or []:
         if entry.event in events and same_month_sheet(entry.month_sheet, sheet_name):
             return str(entry.timestamp or "").strip() or "earlier"
     return ""
@@ -281,19 +294,23 @@ def turn_if_due(service: SheetsService, today: datetime | None = None) -> OpenRe
     month_name, year = this_month(today)
     key = _key(month_name, year)
 
-    if month_status(service, month_name, year).is_open:
+    status = month_status(service, month_name, year)
+    # A month is only "not open" when the Log SAYS so. If the Log could not be
+    # read — a quota error, a renamed worksheet — we do not know, and carrying
+    # the balances on a guess is how one month gets opened five times.
+    if status.log_unreadable or status.is_open:
         _turn_errors.pop(key, None)
         return None
 
     with _turn_lock:
-        attempted = _turn_attempts.get(key)
-        if attempted is not None and (time.monotonic() - attempted) < TURN_RETRY_SECONDS:
+        if key in _turn_attempts and (time.monotonic() - _turn_attempts[key]) < TURN_RETRY_SECONDS:
             return None
         _turn_attempts[key] = time.monotonic()
 
         # Look again without the caches: another session may have just done it.
         data.clear_months()
-        if month_status(service, month_name, year).is_open:
+        fresh = month_status(service, month_name, year)
+        if fresh.log_unreadable or fresh.is_open:
             _turn_errors.pop(key, None)
             return None
 
@@ -303,8 +320,10 @@ def turn_if_due(service: SheetsService, today: datetime | None = None) -> OpenRe
             _turn_errors[key] = user_error_message(exc, "Could not open the month")
             return None
 
+    # The attempt marker is NOT cleared on success. One automatic turn per month
+    # per process is the most this should ever do; a genuine second run is a
+    # deliberate act through "Open the month by hand".
     _turn_errors.pop(key, None)
-    _turn_attempts.pop(key, None)
     return result
 
 

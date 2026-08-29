@@ -182,9 +182,21 @@ are still moving. Neither is a step an admin performs:
   after it. Until then every screen carries the red banner instead of quietly
   showing last month's numbers.
 - Guarded by a module-level lock (process-wide: Streamlit serves all sessions
-  from one process), a 300 s retry throttle after a failure, and a fresh
-  uncached re-check inside the lock. create_month_sheet re-reads the sheet list
-  and refuses to make a second sheet; the copy is idempotent by design.
+  from one process), a 300 s retry throttle, and a fresh uncached re-check
+  inside the lock. create_month_sheet re-reads the sheet list and refuses to
+  make a second sheet; the copy is idempotent by design.
+- A month is only "not open" when the LOG SAYS SO. read_log returns None when
+  the Log cannot be read at all, and turn_if_due refuses to act on that: None
+  and [] are different answers, and treating "we could not read" as "not opened
+  yet" is how August 2026 got carried five times in one evening on the
+  production sheet. Any read can fail — a quota burst, a renamed worksheet.
+- The attempt marker is never cleared on success, so the automatic turn runs at
+  most ONCE per month per process. A genuine second run is a deliberate act
+  through "Open the month by hand". This is a convenience, not a correctness
+  mechanism, and it should never be able to loop.
+- None of this appears on DEV: there is no July 2026 sheet, so August is
+  nothing_to_carry and the whole path is skipped. Test the turn against a month
+  that has a predecessor.
 
 Two states, both proved by the Log and never by the sheet's contents:
 - PREPARED (a prepared or rolled_over row): a copy has filled the sheet, so there
