@@ -26,6 +26,14 @@ from ..runtime_state import bump_cache_version, get_cache_version
 from . import data
 from .calendar_grid import grid_styles
 
+# Where the tab bar lives. Bottom is where a thumb reaches, and it is why this
+# bar exists at all — Streamlit's own navigation is at the top and collapses
+# into a hamburger on a phone. But Community Cloud floats two controls over the
+# bottom-right corner (see page_styles), so on that host a bottom bar costs
+# ~110px of a phone screen to stay clear of them, while the top costs nothing:
+# the header's 60px is already reserved. Flip this and redeploy to compare.
+NAV_AT_TOP = True
+
 TABS = [
     ("Dinner", "dinner", ":material/restaurant:"),
     ("Me", "me", ":material/account_circle:"),
@@ -52,63 +60,67 @@ def page_styles(active_slug: str) -> str:
 
     grid = grid_styles(dark)
 
-    return f"""
-<style>
-  [data-testid="stMainBlockContainer"] {{
+    if NAV_AT_TOP:
+        anchor = f"""
+    top: 0;
+    border-bottom: 1px solid {line};
+    padding: calc(.25rem + env(safe-area-inset-top)) max(.35rem, env(safe-area-inset-right))
+             .25rem max(.35rem, env(safe-area-inset-left));"""
+        indicator = "bottom: 0;\n    border-radius: 3px 3px 0 0;"
+        # The bar is out of the host controls' way, so the page only needs
+        # enough room at the end of the scroll to read the last line.
+        main_padding = """
+  [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {
+    padding-bottom: calc(3.6rem + env(safe-area-inset-bottom)) !important;
+  }"""
+        # A top bar is never in the on-screen keyboard's way.
+        keyboard_rule = ""
+        top_pad = "4.9rem"
+    else:
+        anchor = f"""
+    bottom: 0;
+    border-top: 1px solid {line};
+    padding: .25rem max(.35rem, env(safe-area-inset-left))
+             calc(.25rem + env(safe-area-inset-bottom))
+             max(.35rem, env(safe-area-inset-right));"""
+        indicator = "top: 0;\n    border-radius: 0 0 3px 3px;"
+        main_padding = """
+  [data-testid="stMainBlockContainer"] {
     padding-bottom: calc(5.6rem + env(safe-area-inset-bottom)) !important;
-  }}
-
-  /* The host's two floating controls are 46px tall and live on the bottom edge.
-     Rather than a full-bleed bar with 46px of dead space under it, the bar
-     lifts clear and becomes a floating one — inset, rounded, shadowed. It costs
-     the same height and reads as a deliberate tab bar instead of a bar that
-     has been pushed up. Desktop is untouched: there the tabs are centred inside
-     46rem and the controls land on empty bar background anyway.
-     Delete this the day the app is hosted somewhere that floats nothing. */
-  @media (max-width: 640px) {{
-    .st-key-kpalnav {{
-      left: .5rem !important;
-      right: .5rem !important;
-      /* Streamlit gives the container width:100%, which beats the right offset
-         and hangs the bar off the edge. */
+  }
+  /* Clear of the host's floating controls, as a pill rather than a bar shoved
+     up: same height, but it reads as a tab bar instead of a mistake. */
+  @media (max-width: 640px) {
+    .st-key-kpalnav {
+      left: .5rem !important; right: .5rem !important;
+      /* Streamlit gives the container width:100%, which beats the right
+         offset and hangs the bar off the edge. */
       width: auto !important;
       bottom: calc(46px + env(safe-area-inset-bottom)) !important;
-      border: 1px solid {line} !important;
       border-radius: 18px !important;
       padding: .3rem .4rem !important;
-      box-shadow: {shadow};
-    }}
-    /* A skirt in the page colour under the floating bar, so content does not
-       scroll through the band the host's controls sit in. Negative z-index
-       keeps it behind the bar's own background while staying inside the bar's
-       stacking context, which is above the page. */
-    .st-key-kpalnav::after {{
+    }
+    .st-key-kpalnav::after {
       content: "";
       position: fixed;
       left: 0; right: 0; bottom: 0;
       height: calc(46px + env(safe-area-inset-bottom) + 1.1rem);
-      background: {page_bg};
+      background: PAGE_BG;
       z-index: -1;
-    }}
-    [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {{
+    }
+    [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {
       padding-bottom: calc(5.6rem + 46px + env(safe-area-inset-bottom)) !important;
-    }}
-  }}
+    }
+  }""".replace("PAGE_BG", page_bg)
+        keyboard_rule = (
+            "  /* the keyboard would push the bar over the field being typed in */\n"
+            "  body:has(input:focus, textarea:focus) .st-key-kpalnav { display: none !important; }"
+        )
+        top_pad = "4.5rem"
 
-  /* Streamlit's header is 60px tall, absolutely positioned and painted over the
-     page. Below 400px Streamlit itself drops the main container's top padding to
-     2.2rem — 35px — so the first thing on every screen, the identity chip, loses
-     its ascenders behind the header. Measured, not guessed: the chip's top sat
-     at y=51 under a header ending at y=60.
-
-     Their rule uses this exact selector and !important, so an identical
-     selector only ties and loses on order. Hence the extra ancestor: specificity
-     is the only way to win, and it must stay ahead of theirs. */
-  @media (max-width: 400px) {{
-    [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {{
-      padding-top: 4.5rem !important;
-    }}
-  }}
+    return f"""
+<style>
+{main_padding}
 
   /* Community Cloud serves the app inside <iframe title="streamlitApp"> and
      floats two of its own controls in the HOST page beside it: the viewer badge
@@ -205,15 +217,11 @@ def page_styles(active_slug: str) -> str:
 {grid}
   .st-key-kpalnav {{
     position: fixed;
-    left: 0; right: 0; bottom: 0;
-    /* the top of the stack: a badge we failed to hide must still lose */
+    left: 0; right: 0;
+    /* the top of the stack: anything we failed to hide must still lose */
     z-index: 2147483647;
     background: {bar_bg};
-    border-top: 1px solid {line};
-    box-shadow: {shadow};
-    padding: .25rem max(.35rem, env(safe-area-inset-left))
-             calc(.25rem + env(safe-area-inset-bottom))
-             max(.35rem, env(safe-area-inset-right));
+    box-shadow: {shadow};{anchor}
   }}
 
   .st-key-kpalnav [data-testid="stHorizontalBlock"] {{
@@ -278,22 +286,18 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpalnav_{active_slug} button::before {{
     content: "";
     position: absolute;
-    top: 0;
     left: 50%;
     transform: translateX(-50%);
     width: 26px;
     height: 3px;
-    border-radius: 0 0 3px 3px;
     background: {active};
+    {indicator}
   }}
 
   /* landscape: a 61px bar would eat a sixth of the screen */
   @media (max-height: 460px) {{
     .st-key-kpalnav button {{ min-height: 40px; }}
     .st-key-kpalnav button p {{ display: none !important; }}
-    [data-testid="stMainBlockContainer"] {{
-      padding-bottom: calc(3.8rem + env(safe-area-inset-bottom)) !important;
-    }}
   }}
 
   /* the identity popover trigger: quiet, one line, tappable */
@@ -306,10 +310,14 @@ def page_styles(active_slug: str) -> str:
     min-height: 0 !important;
   }}
 
-  /* on a small phone the primary action has to stay above the fold */
+  /* On a small phone the primary action has to stay above the fold — but not by
+     tucking the first element under the header. Streamlit's header is 60px tall
+     and painted over the page; 2.2rem of padding put the identity chip's top at
+     y=51 behind a header ending at y=60, which is what clipped it. 4.5rem is the
+     smallest value that clears it. */
   @media (max-width: 400px) {{
     [data-testid="stMainBlockContainer"] h1 {{ font-size: 2.1rem !important; padding-top: .2rem !important; }}
-    [data-testid="stMainBlockContainer"] {{ padding-top: 2.2rem !important; }}
+    [data-testid="stMainBlockContainer"] {{ padding-top: {top_pad} !important; }}
   }}
 
   /* the smallest phones still in use, and folded ones */
@@ -320,8 +328,7 @@ def page_styles(active_slug: str) -> str:
     }}
   }}
 
-  /* the keyboard would push the bar over the field being typed in */
-  body:has(input:focus, textarea:focus) .st-key-kpalnav {{ display: none !important; }}
+{keyboard_rule}
 
   @media (prefers-reduced-motion: no-preference) {{
     .st-key-kpalnav button {{ transition: color .12s ease, background .12s ease; }}

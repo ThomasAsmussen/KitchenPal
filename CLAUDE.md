@@ -108,22 +108,22 @@ on a personal screen:
   ours, so our selectors never match them and our z-index, however large, is
   confined to the iframe. Three attempts failed for that one reason before it
   was measured; measure the DOM before writing CSS against someone else's
-  chrome. The fix is to stop putting anything important under them: below 640px
-  the bar lifts clear and becomes a FLOATING pill — inset .5rem, rounded,
-  shadowed — with a skirt (::after, negative z-index, page colour) filling the
-  band beneath it so content does not scroll through where the host's controls
-  sit. Lifting a full-bleed bar was the first attempt and looked like a mistake;
-  the same height reads as deliberate once the bar is detached from the edge.
-  Note width:auto in that rule — Streamlit gives the container width:100%, which
-  beats the right offset and hangs the bar off the screen. Desktop is untouched:
-  there the tabs are centred inside 46rem and the controls land on empty bar.
-  Hosting the app anywhere that does not inject them removes both, with no
-  change to this code.
-  And below 400px Streamlit sets
-  `padding-top: 2.2rem !important` on the main container with the SAME selector
-  we use, which put the identity chip's ascenders behind the 60px header. An
-  identical selector only ties and loses on order, so ours carries an extra
-  ancestor — keep it more specific than theirs.
+  chrome. Staying clear of them at the bottom costs about 110px of a phone
+  screen and three CSS workarounds; the TOP costs nothing, because the header's
+  60px is reserved either way. So NAV_AT_TOP in ui/nav.py decides where the bar
+  lives, and it is True while the app is on Community Cloud. Flip it and
+  redeploy to compare — the bottom branch keeps the floating-pill treatment
+  (inset, rounded, with a ::after skirt in the page colour so content does not
+  scroll through the band the controls sit in, and width:auto because Streamlit
+  gives the container width:100%, which beats the right offset and hangs the bar
+  off the screen). Hosting anywhere that floats nothing makes the bottom free
+  again, and it is the better place for a thumb.
+- The identity chip's clipped ascenders were OUR rule, not Streamlit's: the
+  "primary action above the fold" media query set padding-top: 2.2rem at 400px,
+  putting the chip's top at y=51 behind a header ending at y=60. It was
+  diagnosed as Streamlit's and papered over with a more specific selector before
+  anyone read our own stylesheet to the end. Check what is already there before
+  out-specifying somebody else.
 - ui/identity.py asks once which room you are and keeps it in the query string, so a
   bookmark remembers you. It is a claim, not a login: nothing is locked to it, every
   form still shows the room it will write to, and room selectboxes merely default to
