@@ -48,6 +48,7 @@ def page_styles(active_slug: str) -> str:
     hover = "rgba(110,207,194,.14)" if dark else "rgba(14,81,76,.09)"
     shadow = "0 -2px 18px rgba(0,0,0,.45)" if dark else "0 -2px 14px rgba(20,32,30,.08)"
     bad = "#E28A7C" if dark else "#A33A2C"
+    page_bg = "#0E1117" if dark else "#FFFFFF"
 
     grid = grid_styles(dark)
 
@@ -57,14 +58,37 @@ def page_styles(active_slug: str) -> str:
     padding-bottom: calc(5.6rem + env(safe-area-inset-bottom)) !important;
   }}
 
-  /* The host's two floating controls are 46px tall and sit on the bottom edge.
-     Lift the tabs above them rather than squeezing four tabs into the 253px to
-     their left: the bar keeps its full width and its symmetry, and the strip
-     they land on is empty bar background. Delete this the day the app is hosted
-     somewhere that does not float anything over it. */
+  /* The host's two floating controls are 46px tall and live on the bottom edge.
+     Rather than a full-bleed bar with 46px of dead space under it, the bar
+     lifts clear and becomes a floating one — inset, rounded, shadowed. It costs
+     the same height and reads as a deliberate tab bar instead of a bar that
+     has been pushed up. Desktop is untouched: there the tabs are centred inside
+     46rem and the controls land on empty bar background anyway.
+     Delete this the day the app is hosted somewhere that floats nothing. */
   @media (max-width: 640px) {{
     .st-key-kpalnav {{
-      padding-bottom: calc(.3rem + 46px + env(safe-area-inset-bottom)) !important;
+      left: .5rem !important;
+      right: .5rem !important;
+      /* Streamlit gives the container width:100%, which beats the right offset
+         and hangs the bar off the edge. */
+      width: auto !important;
+      bottom: calc(46px + env(safe-area-inset-bottom)) !important;
+      border: 1px solid {line} !important;
+      border-radius: 18px !important;
+      padding: .3rem .4rem !important;
+      box-shadow: {shadow};
+    }}
+    /* A skirt in the page colour under the floating bar, so content does not
+       scroll through the band the host's controls sit in. Negative z-index
+       keeps it behind the bar's own background while staying inside the bar's
+       stacking context, which is above the page. */
+    .st-key-kpalnav::after {{
+      content: "";
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: calc(46px + env(safe-area-inset-bottom) + 1.1rem);
+      background: {page_bg};
+      z-index: -1;
     }}
     [data-testid="stAppViewContainer"] [data-testid="stMainBlockContainer"] {{
       padding-bottom: calc(5.6rem + 46px + env(safe-area-inset-bottom)) !important;

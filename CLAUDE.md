@@ -108,10 +108,17 @@ on a personal screen:
   ours, so our selectors never match them and our z-index, however large, is
   confined to the iframe. Three attempts failed for that one reason before it
   was measured; measure the DOM before writing CSS against someone else's
-  chrome. The fix is to stop putting anything important under them — below 640px
-  the bar's bottom padding lifts the tab row 46px, so all four tabs clear them
-  and the strip they land on is empty bar background. Hosting the app anywhere
-  that does not inject them removes both, with no change to this code.
+  chrome. The fix is to stop putting anything important under them: below 640px
+  the bar lifts clear and becomes a FLOATING pill — inset .5rem, rounded,
+  shadowed — with a skirt (::after, negative z-index, page colour) filling the
+  band beneath it so content does not scroll through where the host's controls
+  sit. Lifting a full-bleed bar was the first attempt and looked like a mistake;
+  the same height reads as deliberate once the bar is detached from the edge.
+  Note width:auto in that rule — Streamlit gives the container width:100%, which
+  beats the right offset and hangs the bar off the screen. Desktop is untouched:
+  there the tabs are centred inside 46rem and the controls land on empty bar.
+  Hosting the app anywhere that does not inject them removes both, with no
+  change to this code.
   And below 400px Streamlit sets
   `padding-top: 2.2rem !important` on the main container with the SAME selector
   we use, which put the identity chip's ascenders behind the 60px header. An
