@@ -22,6 +22,7 @@ from .sheets.models import (
 from .sheets.log import LogEntry, LogSheetsMixin
 from .sheets.months import MonthSheetsMixin
 from .sheets.planning import PlanningSheetsMixin
+from .sheets.transient import retry_reads
 
 
 class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin, LogSheetsMixin):
@@ -31,11 +32,14 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
         else:
             creds = ServiceAccountCredentials.from_json_keyfile_name(config.credentials_file, GOOGLE_SHEETS_SCOPE)
         client = gspread.authorize(creds)
-        self._spreadsheet = client.open(config.spreadsheet_name)
+        # Opening the spreadsheet is a read, and it is the first thing every
+        # session does — so a few seconds of Google being unavailable used to
+        # take the whole app down for whoever arrived during them.
+        self._spreadsheet = retry_reads(lambda: client.open(config.spreadsheet_name))
         self._template_sheet_name = config.template_sheet_name
 
     def list_sheets(self) -> list[str]:
-        return [ws.title for ws in self._spreadsheet.worksheets()]
+        return [ws.title for ws in retry_reads(self._spreadsheet.worksheets)]
 
     def get_worksheet(self, worksheet_name: str):
         """A worksheet handle, kept once we have it.
@@ -47,7 +51,7 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
         cache = self.__dict__.setdefault("_worksheet_cache", {})
         worksheet = cache.get(worksheet_name)
         if worksheet is None:
-            worksheet = self._spreadsheet.worksheet(worksheet_name)
+            worksheet = retry_reads(lambda: self._spreadsheet.worksheet(worksheet_name))
             cache[worksheet_name] = worksheet
         return worksheet
 

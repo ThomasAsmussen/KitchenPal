@@ -484,7 +484,7 @@ def _cook_dialog(service, context, sheet_name: str, day: int) -> None:
         format_func=lambda entry: entry.name or entry.label,
         key=f"cook_who_{sheet_name}_{day}",
     )
-    if st.button("Put them down", type="primary", use_container_width=True, key=f"cook_go_{sheet_name}_{day}"):
+    if st.button("Put them down", type="primary", width="stretch", key=f"cook_go_{sheet_name}_{day}"):
         _take_dinner(service, sheet_name, day, chosen.label, chosen.name or chosen.label)
         st.rerun()
 
@@ -503,7 +503,7 @@ def _render_cook_controls(service, context, sheet_name: str, day: int, row, room
     if room and st.button(
         "I'll cook this dinner",
         icon=":material/skillet:",
-        use_container_width=True,
+        width="stretch",
         key=f"cook_mine_{sheet_name}_{day}",
     ):
         _take_dinner(service, sheet_name, day, room, "You")
@@ -511,7 +511,7 @@ def _render_cook_controls(service, context, sheet_name: str, day: int, row, room
     st.button(
         "Someone else is cooking",
         type="tertiary",
-        use_container_width=True,
+        width="stretch",
         key=f"cook_other_{sheet_name}_{day}",
         on_click=_cook_dialog,
         args=(service, context, sheet_name, day),
@@ -585,7 +585,7 @@ def _render_signup_controls(service, context, sheet_name, selected_day, row, roo
         right.button(
             "Not eating",
             key=f"dinner_cancel_{sheet_name}_{selected_day}",
-            use_container_width=True,
+            width="stretch",
             on_click=save,
             args=(0,),
         )
@@ -605,7 +605,7 @@ def _render_signup_controls(service, context, sheet_name, selected_day, row, roo
         "I'm eating",
         type="primary",
         key=f"dinner_join_{sheet_name}_{selected_day}",
-        use_container_width=True,
+        width="stretch",
         on_click=save,
         args=(1 + guests,),
     )
@@ -709,7 +709,7 @@ def _swap_dialog(service: SheetsService, context, sheet_name: str, day: int, roo
     # One test click ended up applied twice from a reconnecting tab, so the
     # dialog refuses to fire the same swap twice within a session.
     done_key = f"swapped_{sheet_name}_{day}_{taker.label}_{other_day}"
-    if not st.button("Swap", type="primary", use_container_width=True, key=f"swap_go_{sheet_name}_{day}"):
+    if not st.button("Swap", type="primary", width="stretch", key=f"swap_go_{sheet_name}_{day}"):
         return
     if st.session_state.get(done_key):
         st.caption("That swap has already gone through.")
@@ -756,7 +756,7 @@ def render_dish_form(service: SheetsService, context: DayToDayContext, selected_
             help="Leave blank if the final cost is not known yet.",
             key=f"dish_price_{context.selected_sheet_name}_{selected_day}",
         )
-        submitted = st.form_submit_button("Save dinner details", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save dinner details", type="primary", width="stretch")
 
     if submitted:
         if not dish_name.strip() and not menu_description.strip() and not str(meal_price or "").strip():
@@ -910,7 +910,7 @@ def _edit_purchase_dialog(
             step=0.01,
             key=f"edit_purchase_cost_{entry.row_number}",
         )
-        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+        save = st.form_submit_button("Save", type="primary", width="stretch")
 
     removed = _delete_control("purchase", context, entry.row_number, "purchase")
 
@@ -972,7 +972,7 @@ def _edit_payment_dialog(
             value=_transaction_date_for_edit(entry.date, context.selected_sheet_name),
             key=f"edit_tx_date_{entry.row_number}",
         )
-        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+        save = st.form_submit_button("Save", type="primary", width="stretch")
 
     removed = _delete_control("payment", context, entry.row_number, "payment")
 
@@ -1019,7 +1019,7 @@ def _edit_drinks_dialog(service: SheetsService, context: DayToDayContext, entry)
             value=int(entry.wine),
             key=f"edit_drinks_wine_{entry.row_number}",
         )
-        save = st.form_submit_button("Save", type="primary", use_container_width=True)
+        save = st.form_submit_button("Save", type="primary", width="stretch")
 
     if not save:
         return
@@ -1111,7 +1111,7 @@ def _delete_control(kind: str, context: DayToDayContext, row_number: int, noun: 
         st.button(
             f"Delete this {noun}",
             key=f"arm_delete_{kind}_{row_number}",
-            use_container_width=True,
+            width="stretch",
             on_click=_arm_delete,
             args=(state_key, row_number),
         )
@@ -1123,12 +1123,12 @@ def _delete_control(kind: str, context: DayToDayContext, row_number: int, noun: 
             "Yes, delete",
             key=f"confirm_delete_{kind}_{row_number}",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
         st.button(
             "Keep it",
             key=f"cancel_delete_{kind}_{row_number}",
-            use_container_width=True,
+            width="stretch",
             on_click=_disarm_delete,
             args=(state_key,),
         )
@@ -1201,13 +1201,13 @@ def render_me_view(service: SheetsService):
 
     if room:
         with st.container(horizontal=True, key="kpaladd"):
-            if st.button("Drinks", icon=":material/local_bar:", use_container_width=True):
+            if st.button("Drinks", icon=":material/local_bar:", width="stretch"):
                 _drinks_dialog(service, context, room)
-            if st.button("Purchase", icon=":material/receipt_long:", use_container_width=True):
+            if st.button("Purchase", icon=":material/receipt_long:", width="stretch"):
                 _purchase_dialog(service, context, room)
-            if st.button("Pay in", icon=":material/savings:", use_container_width=True):
+            if st.button("Pay in", icon=":material/savings:", width="stretch"):
                 _payment_dialog(service, context, room)
-            if st.button("Shared cost", icon=":material/group:", use_container_width=True):
+            if st.button("Shared cost", icon=":material/group:", width="stretch"):
                 _andet_dialog(service, context, room)
 
         _render_my_rows(service, context, room)
@@ -1300,8 +1300,8 @@ def add_andet_form(service: SheetsService, context: DayToDayContext, room: str, 
                 f"{len(people)} {'person' if len(people) == 1 else 'people'}"
                 f" · {_format_amount_dkk(amount / len(people))} each"
             )
-        save = st.form_submit_button("Save shared cost", type="primary", use_container_width=True)
-        remove = st.form_submit_button("Delete this cost", use_container_width=True) if entry is not None else False
+        save = st.form_submit_button("Save shared cost", type="primary", width="stretch")
+        remove = st.form_submit_button("Delete this cost", width="stretch") if entry is not None else False
 
     if save:
         if amount <= 0:
@@ -1361,7 +1361,7 @@ def add_drinks_form(service: SheetsService, context: DayToDayContext, room: str)
         beer_quantity = st.number_input("Beers or sodas", min_value=0, step=1, key="drinks_beer")
         wine_quantity = st.number_input("Bottles of wine", min_value=0, step=1, key="drinks_wine")
         st.caption("These are added to the running total for the month.")
-        submitted = st.form_submit_button("Add drinks", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Add drinks", type="primary", width="stretch")
 
     if not submitted:
         return
@@ -1446,7 +1446,7 @@ def add_purchase_form(service: SheetsService, context: DayToDayContext, room: st
         purchase_cost = st.number_input(
             "Total price (negative for refunds like pant)", step=0.01, key="purchase_cost"
         )
-        submitted = st.form_submit_button("Save purchase", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save purchase", type="primary", width="stretch")
 
     if submitted:
         if not purchase_item.strip():
@@ -1524,7 +1524,7 @@ def add_payment_form(service: SheetsService, context: DayToDayContext, room: str
         )
         transaction_amount = st.number_input("Amount (DKK)", min_value=0.0, step=0.01, key="tx_amount")
         transaction_date = st.date_input("Date", value=datetime.now(), key="tx_date")
-        submitted = st.form_submit_button("Save payment", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save payment", type="primary", width="stretch")
 
     if submitted:
         if transaction_amount <= 0:

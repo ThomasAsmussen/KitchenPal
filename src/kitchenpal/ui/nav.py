@@ -348,7 +348,7 @@ def render_bottom_nav(active_slug: str, page_by_slug: dict) -> None:
                     title,
                     key=f"kpalnav_{slug}",
                     icon=icon,
-                    use_container_width=True,
+                    width="stretch",
                 )
                 if clicked and slug != active_slug and slug in page_by_slug:
                     st.switch_page(page_by_slug[slug])
@@ -362,7 +362,7 @@ def render_refresh_footer() -> None:
 
     st.divider()
     left, right = st.columns([1, 3], vertical_alignment="center")
-    if left.button("Refresh data", key="kitchenpal_refresh", use_container_width=True):
+    if left.button("Refresh data", key="kitchenpal_refresh", width="stretch"):
         data.clear_everything()
         bump_cache_version()
         st.rerun()

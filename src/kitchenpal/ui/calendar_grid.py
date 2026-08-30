@@ -53,7 +53,7 @@ def render_grid(
                         st.button(
                             label,
                             key=f"{key}_day_{day}",
-                            use_container_width=True,
+                            width="stretch",
                             disabled=disabled,
                             on_click=on_click,
                             args=args_for(day) if args_for else None,

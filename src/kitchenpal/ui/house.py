@@ -101,7 +101,7 @@ def render_cooking_schedule(service: SheetsService, context, worksheet_name: str
 def _render_index(worksheet_name: str) -> None:
     st.caption(worksheet_name)
     for slug, title, icon, subtitle in SECTIONS:
-        if st.button(title, icon=icon, key=f"house_open_{slug}", help=subtitle, use_container_width=True):
+        if st.button(title, icon=icon, key=f"house_open_{slug}", help=subtitle, width="stretch"):
             st.session_state[SECTION_KEY] = slug
             st.rerun()
 

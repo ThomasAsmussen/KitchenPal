@@ -1,7 +1,10 @@
+import gspread
 import streamlit as st
 
 from .config import AppConfig
 from .runtime_state import get_cached_service
+from .sheets.transient import is_transient
+from .ui.errors import user_error_message
 from .ui.day_to_day import (
     identity_room_entries,
     render_dinner_view,
@@ -85,6 +88,26 @@ def _active_slug(page_by_slug: dict, page) -> str:
     return next(iter(page_by_slug))
 
 
+def _render_sheets_error(exc: Exception) -> None:
+    """What a resident sees when Google is the one having a bad day.
+
+    Anything uncaught here reaches the page as a Python traceback, which tells
+    somebody looking for tonight's dinner nothing they can act on and looks like
+    the accounts have broken. They have not: every number lives in the
+    spreadsheet, and we simply could not read it this second.
+    """
+    if is_transient(exc):
+        st.error(
+            "Google Sheets is not answering right now. Nothing has happened to "
+            "the accounts — try again in a moment."
+        )
+    else:
+        st.error(user_error_message(exc, "The spreadsheet could not be read"))
+    # A button click is a rerun, which is the whole retry: the connection is
+    # rebuilt from scratch when it is missing from the session.
+    st.button("Try again", type="primary", width="stretch", key="kitchenpal_retry")
+
+
 def run_app():
     st.set_page_config(
         page_title="KitchenPal",
@@ -93,12 +116,21 @@ def run_app():
     )
 
     config = AppConfig()
-    service = get_cached_service(config)
+    try:
+        service = get_cached_service(config)
+    except gspread.exceptions.APIError as exc:
+        _render_sheets_error(exc)
+        return
 
     # position="hidden" keeps one real URL per tab — bookmarkable, and the back
     # button works — while the visible tabs are drawn as a bottom bar, which
     # Streamlit's own navigation cannot do on a phone.
     page_by_slug = _build_pages(service)
     page = st.navigation(list(page_by_slug.values()), position="hidden")
-    page.run()
+    try:
+        page.run()
+    except gspread.exceptions.APIError as exc:
+        # The bar is still drawn below, so a page that died on one read does not
+        # trap anyone on it.
+        _render_sheets_error(exc)
     render_bottom_nav(_active_slug(page_by_slug, page), page_by_slug)

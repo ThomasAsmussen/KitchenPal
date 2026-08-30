@@ -541,7 +541,7 @@ state detection when the Log says nothing.
 # Deployment
 
 Community Cloud runs the app from GitHub with `streamlit run streamlit_app.py`,
-which puts `src/` on the path. Two things about that environment have bitten:
+which puts `src/` on the path. Things about that environment that have bitten:
 
 - It picks its own Python and resolves unpinned dependencies at deploy time. It
   was running Python 3.14 while everything here is tested on 3.12, with
@@ -554,6 +554,30 @@ which puts `src/` on the path. Two things about that environment have bitten:
   it stores, and a dataclass built against one copy of a class cannot be pickled
   against another. Chase the FIRST error in the Cloud logs; the cache error is
   usually its shadow, not a separate fault.
+- That pickling error has a SECOND, unrelated cause, and the timestamp tells
+  them apart: a deploy. Cloud does not restart the process — Streamlit's watcher
+  deletes every one of our modules from sys.modules (all of them, not just the
+  changed one: see watcher/local_sources_watcher.py) and the next run re-imports
+  the tree. st.session_state survives that, so the SheetsService in it belongs
+  to the old code and keeps minting old-class dataclasses that pickle refuses.
+  Symptom: `PicklingError: ... it's not the same object as
+  kitchenpal.sheets.models.RoomEntry`, arriving in the same second as
+  "🔄 Updated app!". get_cached_service now keeps the RoomEntry class the
+  connection was built against — resolved through sys.modules, because that
+  lookup IS what pickle does — and rebuilds the connection when it no longer
+  matches. Anything else cached across a deploy is fine: values pickled under
+  the old class unpickle into the new one by name.
+- Google is occasionally unavailable, and nothing used to catch it: four
+  `APIError: [503]` in one evening each showed a resident a traceback and a dead
+  page. sheets/transient.py decides what is worth retrying (5xx and 429; never
+  403/404, which will still be true in half a second), retry_reads wraps the
+  connect and worksheet lookups, and run_app turns an APIError into a sentence
+  plus a Try again button. NEVER wrap a WRITE in retry_reads: a 5xx on a write
+  is ambiguous, the write may have landed, and a retry charges someone's dinner
+  twice. Writes get the error and let the person press the button again.
+- Streamlit deprecations show up in the Cloud log long before they break the
+  app. `use_container_width` became `width="stretch"` / `width="content"`;
+  test_resilience.py fails if it comes back.
 
 # Tests
 

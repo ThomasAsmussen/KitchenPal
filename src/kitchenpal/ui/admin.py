@@ -195,7 +195,7 @@ def _question_card(
             f"{number}. {title}",
             icon=":material/check_circle:" if done else ":material/radio_button_unchecked:",
             key=f"admin_question_{key}",
-            use_container_width=True,
+            width="stretch",
             # An answered question keeps the card's border and drops its own.
             type="primary" if urgent and not done else ("tertiary" if done else "secondary"),
             on_click=_open_question,
@@ -261,7 +261,7 @@ def _render_rollover_screen(service: SheetsService) -> None:
         icon=":material/groups:",
         key="admin_open_roster",
         help=f"Who lives here right now, for a change part-way through {current_month}",
-        use_container_width=True,
+        width="stretch",
         on_click=_go_to_current_roster,
         args=(service, current_month, current_year),
     )
@@ -269,7 +269,7 @@ def _render_rollover_screen(service: SheetsService) -> None:
         "What has been done",
         icon=":material/history:",
         key="admin_open_history",
-        use_container_width=True,
+        width="stretch",
         on_click=_go_to,
         args=("history",),
     )
@@ -291,7 +291,7 @@ def _render_manual_open(service: SheetsService, month_name: str, year: int, stat
         "balances again after correcting last month. Running it BEFORE the 1st only gives "
         "provisional figures — the automatic turn refreshes them once the month starts."
     )
-    if st.button(f"Open {month_name} {year} now", key="admin_open_month", use_container_width=True):
+    if st.button(f"Open {month_name} {year} now", key="admin_open_month", width="stretch"):
         try:
             result = rollover.open_month(service, month_name, year, by=room)
         except ValueError as exc:
@@ -395,7 +395,7 @@ def _moving_body(service, month_name, year, status, room, changes, *, done: bool
         "Someone is moving in",
         icon=":material/person_add:",
         key="admin_arriving",
-        use_container_width=True,
+        width="stretch",
         on_click=_arriving_dialog,
         args=(service, rooms, month_name, year),
     )
@@ -403,7 +403,7 @@ def _moving_body(service, month_name, year, status, room, changes, *, done: bool
         "That's everyone — done",
         key="admin_confirm_occupancy",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         sheet_name = _ensure_prepared(service, month_name, year, room)
         if sheet_name is None:
@@ -431,14 +431,14 @@ def _render_moving_actions(
         "Someone is moving in",
         icon=":material/person_add:",
         key="admin_arriving",
-        use_container_width=True,
+        width="stretch",
         on_click=_arriving_dialog,
         args=(service, rooms, month_name, year),
     )
     if st.button(
         "That's everyone — done",
         key="admin_confirm_occupancy",
-        use_container_width=True,
+        width="stretch",
     ):
         sheet_name = _ensure_prepared(service, month_name, year, room)
         if sheet_name is None:
@@ -592,7 +592,7 @@ def _dinner_days_setting(service: SheetsService, month_name: str, year: int) -> 
             help="Leave blank to allow every normal dinner day. Dates, ranges or weekday names.",
             key=f"admin_limit_days_{month_name}_{year}_{get_cache_version()}",
         )
-        if st.button("Save the dates", key="admin_save_limit_days", use_container_width=True):
+        if st.button("Save the dates", key="admin_save_limit_days", width="stretch"):
             try:
                 service.save_possible_days_limit(month_name, year, limit_input)
             except ValueError as exc:
@@ -610,7 +610,7 @@ def _schedule_tools(service: SheetsService, month_name: str, year: int) -> None:
 
     available, unavailable, preferences, limit_one_day, person_to_room = _stored_availability(context)
     schedule_key = f"admin_schedule_{month_name}_{year}"
-    if st.button("Build a schedule", key="admin_generate_schedule", use_container_width=True):
+    if st.button("Build a schedule", key="admin_generate_schedule", width="stretch"):
         available_days = combine_availability(available, unavailable, context.year, context.month)
         try:
             st.session_state[schedule_key] = schedule_people(
@@ -653,7 +653,7 @@ def _schedule_tools(service: SheetsService, month_name: str, year: int) -> None:
         "Write the cooks to the sheet",
         key="admin_write_cooks",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=not confirm,
     ):
         if missing_rooms:
@@ -714,7 +714,7 @@ def _render_todo(service: SheetsService, month_name: str, year: int, status) -> 
         if st.button(
             f"Move {suggestion.person} into {suggestion.room_label}",
             key=f"admin_move_in_{suggestion.fl_label}",
-            use_container_width=True,
+            width="stretch",
         ):
             _run(
                 service,
@@ -818,7 +818,7 @@ def _render_roster_screen(service: SheetsService) -> None:
         "Someone is moving in",
         icon=":material/person_add:",
         key="admin_add_person",
-        use_container_width=True,
+        width="stretch",
         on_click=_arriving_dialog,
         args=(
             service,
@@ -911,7 +911,7 @@ def _moving_into_room(service, sheet_name, entry, accounts) -> None:
             if st.button(
                 f"Move {person.name} into {entry.label}",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key=f"roster_move_in_{entry.label}",
             ):
                 _run(
@@ -924,7 +924,7 @@ def _moving_into_room(service, sheet_name, entry, accounts) -> None:
 
     with st.form(key=f"roster_new_person_{entry.label}"):
         name = st.text_input(f"Who is moving into {entry.label}?")
-        saved = st.form_submit_button("Move them in", type="primary", use_container_width=True)
+        saved = st.form_submit_button("Move them in", type="primary", width="stretch")
     if saved:
         if not name.strip():
             st.error("Add a name before saving.")
@@ -946,7 +946,7 @@ def _moving_out(service, sheet_name, entry, room: str = "") -> None:
     if st.button(
         f"{entry.name} is moving out",
         key=f"roster_move_out_{entry.label}",
-        use_container_width=True,
+        width="stretch",
     ):
         _run(
             service,
@@ -978,7 +978,7 @@ def _moving_within_the_house(service, sheet_name, entry, others) -> None:
             others,
             format_func=lambda item: f"{item.name} ({item.label})" if item.name else f"{item.label} — empty",
         )
-        saved = st.form_submit_button("Move them there", use_container_width=True)
+        saved = st.form_submit_button("Move them there", width="stretch")
     if saved:
         _run(
             service,
@@ -996,7 +996,7 @@ def _correcting_the_name(service, sheet_name, entry, room: str = "") -> None:
     """A typo is the same person, so this only rewrites the cell."""
     with st.form(key=f"roster_rename_{entry.label}"):
         corrected = st.text_input("The name is spelled wrong", value=entry.name)
-        saved = st.form_submit_button("Save the name", use_container_width=True)
+        saved = st.form_submit_button("Save the name", width="stretch")
     if saved:
         if not corrected.strip():
             return
@@ -1021,7 +1021,7 @@ def _moving_in_from_fl(service, sheet_name, entry, empty_rooms) -> None:
             empty_rooms,
             format_func=lambda item: item.label,
         )
-        saved = st.form_submit_button("Move them in", type="primary", use_container_width=True)
+        saved = st.form_submit_button("Move them in", type="primary", width="stretch")
     if saved:
         _run(
             service,
@@ -1040,7 +1040,7 @@ def _removing_a_settled_person(service, sheet_name, entry) -> None:
     if st.button(
         f"{entry.name} has settled up — remove them",
         key=f"roster_delete_{entry.label}",
-        use_container_width=True,
+        width="stretch",
     ):
         _run(
             service,
@@ -1099,7 +1099,7 @@ def _arriving_dialog(
             "when they have one."
         )
 
-    if not st.button("Add them", type="primary", use_container_width=True, key="admin_arrival_save"):
+    if not st.button("Add them", type="primary", width="stretch", key="admin_arrival_save"):
         return
     if not name.strip():
         st.error("Add a name before saving.")

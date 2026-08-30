@@ -65,7 +65,7 @@ def render_room_picker(room_entries) -> None:
     st.caption("Pick once. It stays in the address of this page, so a bookmark remembers you.")
     for entry in room_entries:
         label = f"{entry.label} — {entry.name}" if entry.name else entry.label
-        if st.button(label, key=f"identity_pick_{entry.label}", use_container_width=True):
+        if st.button(label, key=f"identity_pick_{entry.label}", width="stretch"):
             set_room(entry.label)
             st.rerun()
 
@@ -78,10 +78,10 @@ def render_identity_chip(room_entries, room: str) -> None:
     """
     name = display_name(room_entries, room)
     label = f"You are {room}" + (f" · {name}" if name and name != room else "")
-    with st.popover(label, use_container_width=False):
+    with st.popover(label, width="content"):
         st.caption("Tap your room to switch. Nothing is locked to it.")
         for entry in room_entries:
             entry_label = f"{entry.label} — {entry.name}" if entry.name else entry.label
-            if st.button(entry_label, key=f"identity_switch_{entry.label}", use_container_width=True):
+            if st.button(entry_label, key=f"identity_switch_{entry.label}", width="stretch"):
                 set_room(entry.label)
                 st.rerun()

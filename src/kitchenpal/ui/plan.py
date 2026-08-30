@@ -289,7 +289,7 @@ def render_planning_view(service: SheetsService) -> None:
             "Change my answer",
             key="planning_edit",
             icon=":material/edit_calendar:",
-            use_container_width=True,
+            width="stretch",
             on_click=_start_editing,
             args=(states_key,),
         )
@@ -349,7 +349,7 @@ def _render_editor(
     render_day_grid(context, states_key, override=CANT if cannot else "")
     _render_legend()
 
-    if st.button("Save my answer", type="primary", use_container_width=True, key="planning_save"):
+    if st.button("Save my answer", type="primary", width="stretch", key="planning_save"):
         days = (
             {"available": [], "unavailable": list(context.possible_days), "preferred": []}
             if cannot
@@ -376,4 +376,4 @@ def _render_editor(
         st.rerun()
 
     if answered:
-        st.button("Cancel", key="planning_cancel", use_container_width=True, on_click=_stop_editing)
+        st.button("Cancel", key="planning_cancel", width="stretch", on_click=_stop_editing)

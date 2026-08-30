@@ -258,7 +258,7 @@ def render_availability_overview(service: SheetsService):
         f"{len(_rota_entries(context))} answered"
     )
     if rows:
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, width="stretch")
     else:
         st.caption("Nobody has answered yet.")
 
