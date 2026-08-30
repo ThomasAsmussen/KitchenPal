@@ -18,10 +18,8 @@ questions once it turned out four of its six steps needed no human at all (see
 Admin and The month turns, below).
 
 Next, in order:
-1. COMMIT — none of this session's work is committed, and it lives in one
-   working tree.
-2. Deploy and run the three-task walkthrough with residents.
-3. Birthdays overview under House.
+1. Deploy and run the three-task walkthrough with residents.
+2. Birthdays overview under House.
 
 The plan, the mockups and the settled decisions live in the artifact at
 https://claude.ai/code/artifact/f0d009a0-9197-477f-94fe-80b719e100bb
@@ -474,6 +472,27 @@ hold a dinner on are drawn flat and inert, which retired the "Possible dates:
   had asked for. Dinner shows the month you are living in; nothing showed next
   month, which is the one you just answered about. NOT yet verified against a
   live schedule -- no month on DEV has cooks written.
+
+The reminder to answer (rollover.unanswered_planning_month, 2026-08-30) is a
+line in the accent above the admin caption, on every screen but Plan itself
+-- there it is the same fact said twice, an inch from the answer. Its window
+opens when NEXT MONTH'S SHEET IS PREPARED, because a sheet holding one typed
+name is not a roster and there is no room to answer about yet; it closes when
+they answer, and by itself when the month starts, since next_month() has moved
+on by then and the month after it is not prepared. Nobody without a room on
+next month's sheet is ever asked: they are not on the rota, and the default
+that keeps them off it (_stored_availability) is the very thing a nudge would
+undo. Whose room it is is resolved through the NAME, for the reason under
+Planning sheet identity. Costs nothing for most of the month -- the first gate
+is "does next month's sheet exist", which is answered from the cached sheet
+list -- and two cached reads inside the window. Every read there is wrapped:
+a nudge that takes the page down when the Planning sheet is briefly unreadable
+is worse than no nudge.
+
+Two grey captions stacked read as one paragraph, so the reminder wears
+.kp-nudge (the accent, 600) and the house's status line stays grey. It is not a
+button: the nav bar is at the top, so Plan is already an inch above the line
+telling you to open it.
 
 The old stylesheet was defined, covered by a test that only inspected the string
 it returned, and CALLED FROM NOWHERE -- orphaned when the planner was split into

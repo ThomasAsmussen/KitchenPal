@@ -352,3 +352,125 @@ def test_the_banner_button_opens_the_month(monkeypatch):
 
     assert at.session_state["stub_copied"] == ("September", 2026)
     assert at.session_state["stub_logged"] == ["rolled_over"]
+
+
+# ---------------------------------------------- the reminder to answer Plan
+
+class _PlanStub:
+    def __init__(self, rooms=None, planning=None, log=None, boom=False):
+        self.rooms = rooms or {}
+        self.planning = list(planning or [])
+        self.log = list(log or [])
+        self.boom = boom
+
+    def list_sheets(self):
+        return ["August 2026", "September 2026"]
+
+    def get_log_entries(self):
+        return list(self.log)
+
+    def get_room_entries(self, worksheet_name):
+        if self.boom:
+            raise RuntimeError("the sheet is not answering")
+        return list(self.rooms.get(worksheet_name, []))
+
+    def get_planning_entries(self, month_name, year):
+        return list(self.planning)
+
+
+def _room(label, name=""):
+    return SimpleNamespace(label=label, name=name, account_row=56, signup_column=9)
+
+
+def _planning(room_number, available="", unavailable="", preferred=""):
+    return SimpleNamespace(
+        person="", room_number=room_number, available_dates=available,
+        unavailable_dates=unavailable, preferred_dates=preferred, limit_one_day=False,
+    )
+
+
+def _prepared(sheet="September 2026"):
+    return [_log("prepared", month_sheet=sheet, timestamp="2026-08-25 10:00:00")]
+
+
+@pytest.fixture
+def _september(monkeypatch):
+    """Frederik is in 353 in August and in 353 in September, and it is prepared."""
+    from kitchenpal.ui import day_to_day, rollover as roll
+
+    monkeypatch.setattr(roll, "next_month", lambda today=None: ("September", 2026))
+    monkeypatch.setattr(
+        day_to_day, "identity_room_entries", lambda service: [_room("353", "Frederik Bjerg")]
+    )
+    return roll
+
+
+def test_no_reminder_before_next_month_is_prepared(_september):
+    """A sheet with one typed name is not a roster: there is nothing to answer for."""
+    service = _PlanStub(rooms={"September 2026": [_room("353", "Frederik Bjerg")]}, log=[])
+    assert _september.unanswered_planning_month(service, "353") is None
+
+
+def test_the_reminder_appears_once_the_sheet_is_prepared_and_unanswered(_september):
+    service = _PlanStub(
+        rooms={"September 2026": [_room("353", "Frederik Bjerg")]}, log=_prepared()
+    )
+    assert _september.unanswered_planning_month(service, "353") == ("September", 2026)
+
+
+def test_the_reminder_stops_once_they_have_answered(_september):
+    service = _PlanStub(
+        rooms={"September 2026": [_room("353", "Frederik Bjerg")]},
+        planning=[_planning("353", unavailable="3, 4")],
+        log=_prepared(),
+    )
+    assert _september.unanswered_planning_month(service, "353") is None
+
+
+def test_somebody_without_a_room_next_month_is_never_asked(_september):
+    """They are not on the rota, and the default that keeps them off it is the
+    whole reason they must not be nudged onto it."""
+    service = _PlanStub(
+        rooms={"September 2026": [_room("FL2", "Frederik Bjerg")]}, log=_prepared()
+    )
+    assert _september.unanswered_planning_month(service, "353") is None
+
+
+def test_somebody_who_is_not_on_next_months_sheet_is_never_asked(_september):
+    service = _PlanStub(rooms={"September 2026": [_room("353", "Someone Else")]}, log=_prepared())
+    assert _september.unanswered_planning_month(service, "353") is None
+
+
+def _moved_rooms(planning):
+    """353 in August, 350 in September, with the new occupant of 353 behind them."""
+    return _PlanStub(
+        rooms={"September 2026": [_room("350", "Frederik Bjerg"), _room("353", "Someone Else")]},
+        planning=planning,
+        log=_prepared(),
+    )
+
+
+def test_the_new_occupants_answer_does_not_silence_your_reminder(_september):
+    """Rooms change hands at a rollover, so the room you claim in August says
+    nothing about the row you are answering for in September."""
+    assert _september.unanswered_planning_month(
+        _moved_rooms([_planning("353", unavailable="3, 4")]), "353"
+    ) == ("September", 2026)
+
+
+def test_the_answer_that_silences_it_is_the_one_on_next_months_room(_september):
+    assert _september.unanswered_planning_month(
+        _moved_rooms([_planning("350", unavailable="3, 4")]), "353"
+    ) is None
+
+
+def test_a_read_that_fails_costs_the_reminder_and_nothing_else(_september):
+    service = _PlanStub(log=_prepared(), boom=True)
+    assert _september.unanswered_planning_month(service, "353") is None
+
+
+def test_nobody_is_asked_before_they_have_said_who_they_are(_september):
+    service = _PlanStub(
+        rooms={"September 2026": [_room("353", "Frederik Bjerg")]}, log=_prepared()
+    )
+    assert _september.unanswered_planning_month(service, "") is None

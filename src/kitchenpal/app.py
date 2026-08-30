@@ -36,7 +36,7 @@ def _chrome(service, slug: str, title: str):
         render_identity_chip(room_entries, room)
     if title:
         st.title(title)
-    render_status_banner(service, room)
+    render_status_banner(service, room, slug)
     return room
 
 

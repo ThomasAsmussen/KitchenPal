@@ -369,7 +369,7 @@ def duplicate_people(service: SheetsService, sheet_name: str) -> list[str]:
     return duplicates
 
 
-def render_status_banner(service: SheetsService, room: str = "") -> None:
+def render_status_banner(service: SheetsService, room: str = "", slug: str = "") -> None:
     """One line on every screen: the month is open, or it is not and why."""
     month_name, year = this_month()
     status = month_status(service, month_name, year)
@@ -388,7 +388,83 @@ def render_status_banner(service: SheetsService, room: str = "") -> None:
             st.rerun()
         return
 
+    _render_planning_nudge(service, room, slug)
     _render_next_month_nudge(service)
+
+
+def unanswered_planning_month(service: SheetsService, room: str) -> tuple[str, int] | None:
+    """The month this person can still answer for, when they have not.
+
+    It opens when next month's sheet is PREPARED — a copy has filled it, so
+    there is a real roster and a real room to answer about, which is not true of
+    a sheet holding one typed name. It closes the moment they answer, and by
+    itself when the month starts, because next_month() has moved on by then and
+    the month after it will not be prepared yet.
+
+    Nobody is asked about a month they are not on the rota for. Someone whose
+    row next month has no room is not expected to cook — _stored_availability
+    keeps them off the schedule until they say otherwise — so nudging them would
+    contradict the very default that protects them.
+
+    Every read here is decoration. A nudge that takes the page down with it when
+    the Planning sheet is briefly unreadable is worse than no nudge at all.
+    """
+    if not room:
+        return None
+
+    month_name, year = next_month()
+    sheet_name = resolve_sheet_name(service, month_name, year)
+    if not is_prepared(service, sheet_name):
+        return None
+
+    from .day_to_day import identity_room_entries
+    from .plan import has_answered
+
+    try:
+        my_name = next(
+            (entry.name for entry in identity_room_entries(service) if entry.label == room), ""
+        )
+        if not my_name:
+            return None
+
+        # Resolved through the NAME, for the reason _planning_room_entry gives:
+        # rooms change hands at a rollover, so the room you claim this month is
+        # not necessarily the one you are answering for.
+        key = normalized_person_name(my_name)
+        mine = [
+            entry
+            for entry in data.room_entries(service, sheet_name)
+            if entry.name and normalized_person_name(entry.name) == key
+        ]
+        if len(mine) != 1 or not mine[0].label.isdigit():
+            return None
+
+        stored = {
+            str(entry.room_number).strip(): entry
+            for entry in data.planning_entries(service, month_name, year)
+        }.get(mine[0].label)
+    except Exception:  # noqa: BLE001 — see the docstring
+        return None
+
+    if has_answered(stored, (), year, MONTH_TO_NUMBER[month_name]):
+        return None
+    return month_name, year
+
+
+def _render_planning_nudge(service: SheetsService, room: str, slug: str) -> None:
+    # On Plan it is the same fact said twice, an inch from the answer itself.
+    if slug == "plan":
+        return
+    upcoming = unanswered_planning_month(service, room)
+    if upcoming is None:
+        return
+    # Accented rather than a second grey caption: this one is the reader's own
+    # to-do, and two greys stacked read as one paragraph of house chatter. No
+    # button — the Plan tab is in the bar directly above this line.
+    st.markdown(
+        f'<div class="kp-nudge">Say when you can cook in {upcoming[0]} — under Plan.</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_next_month_nudge(service: SheetsService) -> None:

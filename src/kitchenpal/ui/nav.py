@@ -215,6 +215,16 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpaladd {{ gap: .4rem; }}
   .st-key-kpaladd button p {{ font-size: .85rem !important; }}
   .kp-mine {{ font-weight: 600; }}
+  /* a personal to-do above the fold. Accented, not a second grey caption:
+     it sits beside the house's own status line, and two greys stacked read
+     as one paragraph that nobody's eye separates. */
+  .kp-nudge {{
+    font-size: .85rem;
+    font-weight: 600;
+    color: {active};
+    margin: .1rem 0 .4rem;
+    line-height: 1.35;
+  }}
 
 {grid}
   .st-key-kpalnav {{
