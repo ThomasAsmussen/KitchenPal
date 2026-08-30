@@ -30,7 +30,7 @@ from .month_setup import (
     PlanningContext,
     _answered_count,
     _planning_context,
-    _planning_month,
+    upcoming_month,
     _planning_room_entry,
     _rota_entries,
     _weekday_label,
@@ -249,11 +249,16 @@ def _stop_editing() -> None:
 
 def render_planning_view(service: SheetsService) -> None:
     """The Plan tab: your own dates, and nobody else's."""
-    context = _planning_context(service, show_picker=False)
+    context = _planning_context(service)
     if context is None:
         return
 
     st.subheader(f"{context.month_name} {context.year}")
+    ahead = upcoming_month()
+    if (context.month_name, context.year) != ahead:
+        # Say why you are looking at the month you are in rather than the one
+        # you came to answer for, or the heading reads as the app's mistake.
+        st.caption(f"{ahead[0]} is not ready to plan yet.")
 
     room_entry, claimed = _planning_room_entry(service, context)
     if room_entry is None:
@@ -264,7 +269,6 @@ def render_planning_view(service: SheetsService) -> None:
             )
         else:
             st.info("Pick your room at the top to answer for yourself.")
-        _planning_month(service, show_picker=True)
         return
 
     if room_entry.label != claimed:
@@ -295,7 +299,6 @@ def render_planning_view(service: SheetsService) -> None:
         )
 
     _render_progress(context, answered)
-    _planning_month(service, show_picker=True)
 
 
 def _render_progress(context: PlanningContext, answered: bool) -> None:

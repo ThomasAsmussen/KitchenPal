@@ -473,6 +473,32 @@ hold a dinner on are drawn flat and inert, which retired the "Possible dates:
   month, which is the one you just answered about. NOT yet verified against a
   live schedule -- no month on DEV has cooks written.
 
+Plan does not ask which month (2026-08-30). It was a 12-month dropdown crossed
+with a 3-year one -- 36 combinations against the two sheets that exist -- and
+picking one of the other 34 replaced the page with "Create the January 2025
+sheet before planning." Because that message came from an early return, the
+picker sat BELOW it and vanished with the page: one mistap in a virtualised
+dropdown on a phone and the tab was dead for the session. Refresh does not
+rescue it, because it clears the data caches and not the choice.
+
+Narrowing the options to the sheets that exist was the first fix and it was the
+wrong shape. The question has ONE right answer -- planning is about the month
+ahead; nobody opens this tab to answer for a month at random -- so the tab
+works it out instead of asking. _planning_month: next month when it has a
+sheet, otherwise the month we are living in.
+
+The fallback is not a detail. Next month's sheet only appears when an admin
+first prepares it, usually in the last week, so a tab pinned to next month
+would spend three weeks of every month hiding your own answer and your own
+cooking nights behind "create the sheet first". It moves on by itself the day
+next month is prepared -- the same moment the reminder below starts -- and says
+"September is not ready to plan yet" while it waits, because an unexplained
+heading on the wrong month reads as the app's mistake.
+
+House's availability overview and Plan share this, so the overview now follows
+the month being planned instead of whatever a picker on another tab was left
+on. Admin is unaffected: it passes its own month and year.
+
 The reminder to answer (rollover.unanswered_planning_month, 2026-08-30) is a
 line in the accent above the admin caption, on every screen but Plan itself
 -- there it is the same fact said twice, an inch from the answer. Its window
@@ -586,6 +612,18 @@ which puts `src/` on the path. Things about that environment that have bitten:
   lookup IS what pickle does — and rebuilds the connection when it no longer
   matches. Anything else cached across a deploy is fine: values pickled under
   the old class unpickle into the new one by name.
+- The same eviction has a THIRD symptom, and it is not ours to fix:
+  `KeyError: 'kitchenpal.constants'` raised from importlib's _bootstrap at
+  `module = sys.modules.pop(spec.name)`. The module had finished executing; the
+  watcher thread deleted it from sys.modules while the script thread was still
+  importing it. It can only happen in the second a deploy lands (check the
+  timestamps against the "Pulling code changes" line), it recovers on the next
+  run, and NO code of ours can catch it — it dies importing app.py, before a
+  line of the app runs. Do not chase it. If it ever becomes a nuisance,
+  `server.fileWatcherType = "none"` removes the watcher and all three symptoms
+  at once, but Cloud appears to rely on that watcher to pick up pulled code, so
+  a push might then do nothing until a reboot. Untested; verify a deploy
+  actually lands before trusting it.
 - Google is occasionally unavailable, and nothing used to catch it: four
   `APIError: [503]` in one evening each showed a resident a traceback and a dead
   page. sheets/transient.py decides what is worth retrying (5xx and 429; never

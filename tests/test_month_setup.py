@@ -427,3 +427,52 @@ def test_resident_labels_are_the_numbered_rooms_someone_lives_in():
 
     # "Everyone in the house" is rooms 346-360 only: no FL, no empty room
     assert resident_labels(_account_entries()) == ["346", "360"]
+
+
+# ------------------------------------------------- which month Plan is about
+
+from datetime import datetime
+
+
+class _SheetStub:
+    def __init__(self, sheets):
+        self.sheets = list(sheets)
+
+    def list_sheets(self):
+        return list(self.sheets)
+
+
+AUGUST = datetime(2026, 8, 30)
+
+
+def test_plan_is_about_next_month_once_its_sheet_exists():
+    service = _SheetStub(["August 2026", "September 2026", "Planning"])
+
+    assert month_setup._planning_month(service, AUGUST) == ("September", 2026)
+
+
+def test_plan_falls_back_to_this_month_until_next_month_is_prepared():
+    """Next month's sheet only appears when an admin prepares it, usually in the
+    last week. Pinned to next month, the tab would spend most of the month
+    hiding your own answer behind "create the sheet first"."""
+    service = _SheetStub(["August 2026", "Planning"])
+
+    assert month_setup._planning_month(service, AUGUST) == ("August", 2026)
+
+
+def test_plan_names_next_month_when_no_sheet_can_answer_for_it():
+    service = _SheetStub(["Planning", "Log"])
+
+    assert month_setup._planning_month(service, AUGUST) == ("September", 2026)
+
+
+def test_a_danish_sheet_name_counts_as_that_month_existing():
+    service = _SheetStub(["Maj 2026", "Juni 2026"])
+
+    assert month_setup._planning_month(service, datetime(2026, 5, 4)) == ("June", 2026)
+
+
+def test_december_plans_into_january_of_the_next_year():
+    service = _SheetStub(["December 2026", "January 2027"])
+
+    assert month_setup._planning_month(service, datetime(2026, 12, 15)) == ("January", 2027)

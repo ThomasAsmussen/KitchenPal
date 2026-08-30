@@ -79,32 +79,48 @@ class PlanningContext:
     limit_days: str
 
 
-def _planning_month(service: SheetsService, *, show_picker: bool):
-    """Planning is about the month ahead, so it keeps its own choice."""
-    next_month_date = datetime.now().replace(day=1) + timedelta(days=32)
-    year_key, month_key = "planning_year", "planning_month"
-    if month_key not in st.session_state:
-        st.session_state[month_key] = ENGLISH_MONTHS[next_month_date.month - 1]
-    if year_key not in st.session_state:
-        st.session_state[year_key] = next_month_date.year
+def upcoming_month(today: datetime | None = None) -> tuple[str, int]:
+    """The month after the one we are living in."""
+    now = today or datetime.now()
+    following = now.replace(day=1) + timedelta(days=32)
+    return ENGLISH_MONTHS[following.month - 1], following.year
 
-    if show_picker:
-        with st.expander("Choose month"):
-            st.selectbox("Month", ENGLISH_MONTHS, key=month_key)
-            st.selectbox("Year", [next_month_date.year - 1, next_month_date.year, next_month_date.year + 1], key=year_key)
-    return st.session_state[month_key], int(st.session_state[year_key])
+
+def _planning_month(service: SheetsService, today: datetime | None = None) -> tuple[str, int]:
+    """The month Plan is about — decided, not chosen.
+
+    There was a picker here, and it could not be made safe: it offered 12 months
+    crossed with 3 years against the two sheets that exist, so most of what it
+    offered was a dead end. But the deeper problem was that it asked a question
+    with one right answer. Planning is about the month ahead; nobody opens this
+    tab to answer for a month at random.
+
+    NEXT month, then, whenever there is a sheet for it. Not "next month, full
+    stop": next month's sheet only appears when an admin first prepares it,
+    which is usually the last week, so a tab pinned to it would spend three
+    weeks of every month saying "create the sheet first" — with your own answer
+    and your own cooking nights behind that message. It falls back to the month
+    we are living in, which always has a sheet, and moves on by itself the day
+    next month's is prepared.
+    """
+    now = today or datetime.now()
+    sheets = _month_sheet_names(data.sheet_names(service))
+    ahead = upcoming_month(now)
+    for month_name, year in (ahead, (ENGLISH_MONTHS[now.month - 1], now.year)):
+        if _month_sheet_for(MONTH_TO_NUMBER[month_name], year, sheets):
+            return month_name, year
+    return ahead
 
 
 def _planning_context(
     service: SheetsService,
     *,
-    show_picker: bool = False,
     month_name: str | None = None,
     year: int | None = None,
 ) -> PlanningContext | None:
-    """Plan keeps its own month; Admin passes the one the rollover is about."""
+    """Plan works out its own month; Admin passes the one the rollover is about."""
     if month_name is None or year is None:
-        month_name, year = _planning_month(service, show_picker=show_picker)
+        month_name, year = _planning_month(service)
     month = MONTH_TO_NUMBER[month_name]
 
     available_month_sheets = _month_sheet_names(data.sheet_names(service))

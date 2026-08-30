@@ -94,3 +94,85 @@ def test_the_grid_styles_ride_with_every_page():
     on_the_page = page_styles("plan")
     assert '[class*="st-key-kpalcal_"]' in on_the_page
     assert '[class*="st-key-kpalday_mine_"]' in on_the_page
+
+
+def test_plan_asks_nobody_which_month_they_meant():
+    """Reported from production: the month picker offered 36 combinations against
+    the two sheets that exist, and choosing one of the other 34 replaced the page
+    with "create the sheet first" — taking the picker with it, because it was
+    drawn below that early return. The tab was then dead for the whole session;
+    Refresh clears the data caches, not the choice. There is one right answer to
+    "which month", so the tab no longer asks."""
+    from streamlit.testing.v1 import AppTest
+
+    def script():
+        from kitchenpal.ui.plan import render_planning_view
+
+        class Stub:
+            def list_sheets(self):
+                return ["August 2019"]
+
+        render_planning_view(Stub())
+
+    at = AppTest.from_function(script).run()
+
+    assert not at.exception
+    assert any("before planning" in block.value for block in at.info)
+    assert len(at.selectbox) == 0
+
+
+def _plan_stub_script(sheets):
+    def script():
+        import streamlit as st
+
+        from kitchenpal.ui.plan import render_planning_view
+
+        class Stub:
+            def list_sheets(self):
+                return st.session_state["sheets"]
+
+            def get_room_entries(self, worksheet_name):
+                return []
+
+            def get_planning_entries(self, month_name, year):
+                return []
+
+            def get_possible_days_limit(self, month_name, year):
+                return ""
+
+        render_planning_view(Stub())
+
+    return script
+
+
+def test_plan_says_why_it_is_showing_the_month_you_are_in():
+    """Falling back is right, but an unexplained heading reads as the app's mistake."""
+    from datetime import datetime
+
+    from streamlit.testing.v1 import AppTest
+
+    from kitchenpal.ui.month_setup import upcoming_month
+
+    this_month = datetime.now().strftime("%B %Y")
+    at = AppTest.from_function(_plan_stub_script(None))
+    at.session_state["sheets"] = [this_month]
+    at.run()
+
+    assert not at.exception
+    assert any(f"{upcoming_month()[0]} is not ready to plan yet" in c.value for c in at.caption)
+
+
+def test_plan_says_nothing_extra_when_it_is_on_the_month_you_came_for():
+    from datetime import datetime
+
+    from streamlit.testing.v1 import AppTest
+
+    from kitchenpal.ui.month_setup import upcoming_month
+
+    ahead = upcoming_month()
+    at = AppTest.from_function(_plan_stub_script(None))
+    at.session_state["sheets"] = [datetime.now().strftime("%B %Y"), f"{ahead[0]} {ahead[1]}"]
+    at.run()
+
+    assert not at.exception
+    assert not any("not ready to plan yet" in c.value for c in at.caption)
