@@ -70,18 +70,42 @@ def render_room_picker(room_entries) -> None:
             st.rerun()
 
 
+ROOM_POPOVER_KEY = "kitchenpal_identity_open"
+
+
+def _switch_room(label: str) -> None:
+    """Take the room and shut the panel, both before the script body runs.
+
+    A popover does not close because something inside it was clicked, and
+    st.rerun() does not close it either: its open state is a WIDGET VALUE, so
+    the only way to shut it from here is to write False to that value — and a
+    widget value may only be written before the widget is instantiated. An
+    on_click callback is exactly that moment, which is why this is a callback
+    and not the body of an `if st.button(...)`.
+    """
+    set_room(label)
+    st.session_state[ROOM_POPOVER_KEY] = False
+
+
 def render_identity_chip(room_entries, room: str) -> None:
     """One compact line: who the app thinks you are, and a tap to change it.
 
     A popover rather than a label plus a button — on a phone that pair costs two
-    rows and never lines up.
+    rows and never lines up. It is given on_change because that is what makes it
+    stateful (is_stateful = on_change != "ignore" in Streamlit's own layouts.py);
+    without it the open state lives only in the browser and nothing here can
+    reach it.
     """
     name = display_name(room_entries, room)
     label = f"You are {room}" + (f" · {name}" if name and name != room else "")
-    with st.popover(label, width="content"):
+    with st.popover(label, width="content", key=ROOM_POPOVER_KEY, on_change="rerun"):
         st.caption("Tap your room to switch. Nothing is locked to it.")
         for entry in room_entries:
             entry_label = f"{entry.label} — {entry.name}" if entry.name else entry.label
-            if st.button(entry_label, key=f"identity_switch_{entry.label}", width="stretch"):
-                set_room(entry.label)
-                st.rerun()
+            st.button(
+                entry_label,
+                key=f"identity_switch_{entry.label}",
+                width="stretch",
+                on_click=_switch_room,
+                args=(entry.label,),
+            )

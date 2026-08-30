@@ -91,3 +91,22 @@ def test_the_chip_can_switch_to_another_room():
     assert not at.exception
     assert _room_param(at) == "346"
     assert any("claimed:346" in element.value for element in at.markdown)
+
+
+def test_choosing_a_room_shuts_the_panel():
+    """Otherwise you have to tap somewhere else to get rid of it. A popover does
+    not close because something inside it was clicked, and st.rerun() does not
+    close it either — its open state is a widget value, written here before the
+    widget is instantiated, which is only possible from a callback."""
+    from kitchenpal.ui.identity import ROOM_POPOVER_KEY
+
+    at = AppTest.from_function(_identity_app)
+    at.query_params["room"] = "350"
+    at.run()
+    at.session_state[ROOM_POPOVER_KEY] = True
+
+    at.button(key="identity_switch_346").click().run()
+
+    assert not at.exception
+    assert at.session_state[ROOM_POPOVER_KEY] is False
+    assert _room_param(at) == "346"

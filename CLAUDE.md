@@ -109,8 +109,15 @@ on a personal screen:
   affordance the card exists for was unreachable on the device everybody uses.
   nav.page_styles pins it visible inside .st-key-kpalpay, via the toolbar being
   the only div child of stCode (the other is the pre) -- never the emotion class.
-  "I've transferred it" opens the existing Pay in dialog with the amount already
-  in it: recording the payment is the step people forget, and the moment just
+  "I've transferred it" ARMS a session flag that render_me_view pops
+  (take_armed_transfer), and the card's own return value means only "was it
+  drawn". They were one value once: the card returned `float | None` while two
+  early returns still said `return False` from an earlier version, and
+  `False is not None` — so every run that did NOT draw the card opened the
+  payment dialog. Switching to anyone in credit did it, reported from
+  production 2026-08-30. A return value doing double duty as data and as a
+  signal rots the moment its type changes; a flag that means one thing cannot.
+  It opens the existing dialog with the amount already in it: recording the payment is the step people forget, and the moment just
   after the transfer is the only one they remember it in.
   The house has no MobilePay number and does not expect one, so the deep-link
   idea is dead rather than deferred -- do not rebuild it speculatively.
@@ -163,7 +170,13 @@ on a personal screen:
   anyone read our own stylesheet to the end. Check what is already there before
   out-specifying somebody else.
 - ui/identity.py asks once which room you are and keeps it in the query string, so a
-  bookmark remembers you. It is a claim, not a login: nothing is locked to it, every
+  bookmark remembers you. Choosing a room CLOSES the panel: a popover does not
+  close because something inside it was clicked, and st.rerun() does not close
+  it either. Its open state is a widget value — but only when it is stateful,
+  and `is_stateful = on_change != "ignore"` in Streamlit's layouts.py, so the
+  popover is given a key AND on_change="rerun". Writing False to that value is
+  then legal only before the widget is instantiated, which is what the on_click
+  callback is for. It is a claim, not a login: nothing is locked to it, every
   form still shows the room it will write to, and room selectboxes merely default to
   you. st.switch_page drops the query string, so identity is re-stamped every run.
 - One "Refresh data" for the whole app, at the bottom of the page (nav.py), instead

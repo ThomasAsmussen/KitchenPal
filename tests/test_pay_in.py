@@ -106,7 +106,10 @@ def _card_script():
         statement = SimpleNamespace(
             label="354", name="Philip Andersen", balance=st.session_state["balance"], components={}
         )
-        st.session_state["returned"] = render_transfer_card(Stub(), context, statement, "354")
+        render_transfer_card(Stub(), context, statement, "354")
+        from kitchenpal.ui.day_to_day import take_armed_transfer
+
+        st.session_state["returned"] = take_armed_transfer()
 
     return script
 
@@ -151,6 +154,14 @@ class TestWhenTheCardAppears:
         at = _run_card(495.99)
 
         assert len(at.code) == 0
+
+    @pytest.mark.parametrize("balance", [495.99, -115.10, 0.0])
+    def test_a_card_that_is_not_drawn_records_nothing(self, balance):
+        """The reported bug: the card returned `float | None` while its early
+        returns still said `return False`, and `False is not None`. Every run
+        that did NOT draw the card opened the payment dialog — switching to
+        anyone in credit did it."""
+        assert _run_card(balance).session_state["returned"] is None
 
     def test_nothing_when_the_sheet_has_no_account_on_it(self):
         from streamlit.testing.v1 import AppTest

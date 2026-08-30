@@ -853,6 +853,27 @@ def _render_statement(statement, *, day_rows, room, drinks, purchases) -> None:
         )
 
 
+RECORD_TRANSFER_KEY = "kpal_record_transfer"
+
+
+def _arm_recording(amount_key: str) -> None:
+    """Remember what to record; render_me_view consumes it on this same run."""
+    st.session_state[RECORD_TRANSFER_KEY] = float(st.session_state.get(amount_key) or 0.0)
+
+
+def take_armed_transfer() -> float | None:
+    """The amount to record, ONCE. Reading it clears it.
+
+    Deliberately NOT the card's return value. It used to be, and the card
+    returned `float | None` while its two early returns still said `return
+    False` from an earlier version — and `False is not None`, so every run that
+    did NOT draw the card opened the payment dialog instead. Switching to
+    anyone in credit did it. One flag that means one thing cannot rot that way;
+    a return value doing double duty as data and as a signal can.
+    """
+    return st.session_state.pop(RECORD_TRANSFER_KEY, None)
+
+
 def _danish_amount(amount: float) -> str:
     """342,50 — the decimal comma a Danish banking app expects to be pasted."""
     return f"{amount:.2f}".replace(".", ",")
@@ -879,7 +900,7 @@ def _copy_field(label: str, value: str) -> None:
     st.code(value, language=None, wrap_lines=True)
 
 
-def render_transfer_card(service: SheetsService, context: DayToDayContext, statement, room: str) -> float | None:
+def render_transfer_card(service: SheetsService, context: DayToDayContext, statement, room: str) -> bool:
     """Where to send the money, at the moment the balance says you owe it.
 
     Me answered "what do you owe" and then stopped, and the next question — where
@@ -892,9 +913,9 @@ def render_transfer_card(service: SheetsService, context: DayToDayContext, state
     ordinary course of a month, and a card that appears the day after somebody
     eats is one people learn to scroll past.
 
-    Returns the amount to record when the person says they have transferred it,
-    and None otherwise — the amount is theirs to change, because paying part of
-    a big balance is a normal thing to do.
+    The amount is theirs to change, because paying part of a big balance is a
+    normal thing to do. Saying "I've transferred it" arms take_armed_transfer()
+    rather than returning a value; returns whether the card was drawn at all.
     """
     if statement is None or -statement.balance <= TRANSFER_REMINDER_THRESHOLD_DKK:
         return False
@@ -910,13 +931,14 @@ def render_transfer_card(service: SheetsService, context: DayToDayContext, state
         # looked resets the field instead of quietly offering a stale number —
         # while an amount you typed yourself survives every rerun in between.
         st.markdown('<div class="kp-field">Amount</div>', unsafe_allow_html=True)
+        amount_key = f"kpal_transfer_amount_{context.selected_sheet_name}_{room}_{owed:.2f}"
         amount = st.number_input(
             "Amount to transfer",
             label_visibility="collapsed",
             min_value=0.0,
             value=float(f"{owed:.2f}"),
             step=50.0,
-            key=f"kpal_transfer_amount_{context.selected_sheet_name}_{room}_{owed:.2f}",
+            key=amount_key,
         )
         st.code(_danish_amount(amount), language=None, wrap_lines=True)
         if bank.reg_number and bank.account_number:
@@ -931,14 +953,18 @@ def render_transfer_card(service: SheetsService, context: DayToDayContext, state
             _copy_field("Account", bank.text)
         _copy_field("Message", _transfer_message(room, statement.name))
         st.caption("Pay all of it or part of it — the amount above is what you owe right now.")
-        if st.button(
+        # Arms the flag rather than answering through this function's return
+        # value, which is now only ever "was the card drawn". See
+        # take_armed_transfer for what mixing the two cost.
+        st.button(
             "I've transferred it",
             key="kpal_transferred",
             icon=":material/check:",
             width="stretch",
-        ):
-            return float(amount)
-    return None
+            on_click=_arm_recording,
+            args=(amount_key,),
+        )
+    return True
 
 
 @st.dialog("Add drinks")
@@ -1289,7 +1315,8 @@ def render_me_view(service: SheetsService):
         )
 
     if room:
-        transferred = render_transfer_card(service, context, statement, room)
+        render_transfer_card(service, context, statement, room)
+        transferred = take_armed_transfer()
         if transferred is not None:
             # Recording it is the step people forget, and the moment just after
             # the transfer is the only one they will ever remember it in.
