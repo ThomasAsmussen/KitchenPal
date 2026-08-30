@@ -184,6 +184,10 @@ MONTH_METADATA_RANGE = "AS3:AT3"
 # this whole region down with it.
 KITCHEN_FUND_BANK_RANGE = "AC35:AC42"
 
+# The same block's figures: labels in AC, amounts in AG. Rows are found by what
+# their label SAYS, never by number — see KITCHEN_FUND_BANK_RANGE above.
+KITCHEN_FUND_STATUS_RANGE = "AC35:AG39"
+
 # Below this, the app says nothing about transferring. Everybody's balance dips
 # negative in the ordinary course of a month — dues on the 1st, a dinner, a
 # round of drinks — and a card that appears every time somebody eats is a card

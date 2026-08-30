@@ -134,3 +134,20 @@ class BankDetails:
     reg_number: str
     account_number: str
     text: str
+
+
+@dataclass(frozen=True)
+class KitchenFundStatus:
+    """What the fund is worth, as the STATUS box computes it.
+
+    `residents` keeps the sheet's sign — negative when the house collectively
+    owes the fund — which is the same direction every other balance in the app
+    carries. The total is the sheet's own figure and is NOT recomputed here:
+    total = bank + cash - residents, and the app's job is to name it, not to
+    check the spreadsheet's arithmetic.
+    """
+
+    bank: float
+    cash: float
+    residents: float
+    total: float

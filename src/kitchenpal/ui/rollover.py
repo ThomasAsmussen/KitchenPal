@@ -38,6 +38,11 @@ TURN_RETRY_SECONDS = 300
 _turn_lock = threading.Lock()
 _turn_attempts: dict[str, float] = {}
 _turn_errors: dict[str, str] = {}
+# Months this process has already carried. _turn_attempts only THROTTLES — it
+# holds a timestamp and expires after TURN_RETRY_SECONDS — so it cannot be the
+# thing that caps the automatic turn; it exists to stop a failing turn hammering
+# the API. This is the cap.
+_turn_completed: set[str] = set()
 
 
 def _key(month_name: str, year: int) -> str:
@@ -293,6 +298,12 @@ def turn_if_due(service: SheetsService, today: datetime | None = None) -> OpenRe
     """The automatic turn: called on every page load, free once it has run."""
     month_name, year = this_month(today)
     key = _key(month_name, year)
+    # One automatic turn per month per process, whatever anything else says.
+    # The Log is the real authority (status.is_open); this is the backstop for
+    # the case where the Log is telling us something wrong, which is exactly how
+    # August 2026 got carried five times in one evening.
+    if key in _turn_completed:
+        return None
 
     status = month_status(service, month_name, year)
     # A month is only "not open" when the Log SAYS so. If the Log could not be
@@ -320,9 +331,9 @@ def turn_if_due(service: SheetsService, today: datetime | None = None) -> OpenRe
             _turn_errors[key] = user_error_message(exc, "Could not open the month")
             return None
 
-    # The attempt marker is NOT cleared on success. One automatic turn per month
-    # per process is the most this should ever do; a genuine second run is a
-    # deliberate act through "Open the month by hand".
+    # A genuine second run is a deliberate act through "Open the month by hand",
+    # which calls open_month directly and is not capped.
+    _turn_completed.add(key)
     _turn_errors.pop(key, None)
     return result
 

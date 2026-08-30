@@ -216,3 +216,43 @@ def find_bank_details(cells) -> tuple[str, str, str] | None:
         if parsed:
             return parsed
     return None
+
+
+# The STATUS box's four figures, matched on what the label says. The house wrote
+# these labels and may reword them; the most specific match is tried first so
+# that "Køkkenkassen I alt" cannot be taken for the bank row.
+_FUND_ROW_MARKERS = (
+    ("residents", ("samlede saldo", "brugernes")),
+    ("cash", ("kontantbeholdning", "kontant")),
+    ("total", ("i alt",)),
+    ("bank", ("bankkonto", "bank")),
+)
+
+
+def find_fund_status(rows) -> dict[str, float] | None:
+    """{bank, cash, residents, total} from the STATUS block, or None.
+
+    None when the two figures the overview cannot be drawn without — the bank
+    balance and the total — are not both there. A house that has reworded its
+    sheet should see the rest of the app work rather than a wrong number.
+    """
+    found: dict[str, float] = {}
+    for row in rows or []:
+        label = str(row[0] if row else "").strip().lower()
+        if not label:
+            continue
+        amount = row[4] if len(row) > 4 else ""
+        for name, markers in _FUND_ROW_MARKERS:
+            if name in found:
+                continue
+            if any(marker in label for marker in markers):
+                found[name] = parse_amount_value(amount)
+                break
+    if "bank" not in found or "total" not in found:
+        return None
+    return {
+        "bank": found["bank"],
+        "cash": found.get("cash", 0.0),
+        "residents": found.get("residents", 0.0),
+        "total": found["total"],
+    }

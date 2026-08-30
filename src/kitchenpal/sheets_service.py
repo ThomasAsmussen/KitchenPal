@@ -11,6 +11,7 @@ from .sheets.models import (
     BankDetails,
     DayRow,
     DayToDayEntries,
+    KitchenFundStatus,
     DaySummary,
     DrinkEntry,
     FeedbackEntry,
@@ -64,6 +65,7 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
 __all__ = [
     "AccountStatement",
     "BankDetails",
+    "KitchenFundStatus",
     "AndetRow",
     "DayRow",
     "DayToDayEntries",

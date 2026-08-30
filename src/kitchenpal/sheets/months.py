@@ -4,6 +4,7 @@ from ..constants import (
     DAY_SHEET_SIGNUP_HEADER_RANGE,
     ENGLISH_MONTHS,
     KITCHEN_FUND_BANK_RANGE,
+    KITCHEN_FUND_STATUS_RANGE,
     MONTH_METADATA_RANGE,
     PERSONAL_ACCOUNT_HEADER_LABEL,
     PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE,
@@ -16,9 +17,10 @@ from ..constants import (
     PERSONAL_ACCOUNT_TRANSACTION_TOTAL_RANGE,
 )
 from ..a1 import range_start_row as _range_start_row
-from .models import BankDetails
+from .models import BankDetails, KitchenFundStatus
 from .utils import (
     find_bank_details as _find_bank_details,
+    find_fund_status as _find_fund_status,
     first_cell_value as _first_cell_value,
     format_room_label as _format_room_label,
     is_data_room_label as _is_data_room_label,
@@ -84,6 +86,15 @@ class MonthSheetsMixin:
             return None
         reg, account, text = found
         return BankDetails(reg_number=reg, account_number=account, text=text)
+
+    def get_kitchen_fund_status(self, worksheet_name: str) -> KitchenFundStatus | None:
+        """What the fund is worth, from the sheet's own STATUS box."""
+        worksheet = self.get_worksheet(worksheet_name)
+        rows = worksheet.batch_get([KITCHEN_FUND_STATUS_RANGE])[0]
+        found = _find_fund_status(rows)
+        if found is None:
+            return None
+        return KitchenFundStatus(**found)
 
     def check_month_sheet_integrity(self, worksheet_name: str) -> list[str]:
         # Month sheets are made by hand, and every range the app reads is a row

@@ -51,8 +51,59 @@ def _balance_row(name: str, amount: float, *, mine: bool) -> None:
     )
 
 
+def _fund_line(label: str, amount: float) -> None:
+    st.markdown(
+        f'<div class="kp-line"><span>{label}</span>'
+        f'<span class="kp-note">{_format_amount_dkk(amount)}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_fund_summary(service: SheetsService, worksheet_name: str) -> None:
+    """What the fund is worth: the total, then the two parts it is made of.
+
+    The same shape as a person's statement on Me — one number, then the parts
+    the sheet itself computed — because it answers the same kind of question one
+    level up.
+
+    The parts are shown so that they ADD UP on screen. The sheet's total is
+    bank + cash MINUS the residents' combined balance, which is negative while
+    the house owes money; printing that balance with its own sign next to a
+    larger total would read as an arithmetic error. So the line is turned around
+    to face the fund: money the house still owes is money coming IN.
+    """
+    status = data.fund_status(service, worksheet_name)
+    if status is None:
+        return
+
+    owed_in = -status.residents
+    with st.container(border=True, key="kpalfund"):
+        st.markdown('<div class="kp-kicker">The kitchen fund</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="kp-money">{_format_amount_dkk(status.total)}</div>',
+            unsafe_allow_html=True,
+        )
+        if owed_in > 0:
+            sentence = "In the bank, plus what the house still owes it."
+        elif owed_in < 0:
+            sentence = "In the bank, less what it owes the house."
+        else:
+            sentence = "All of it is in the bank — nobody owes anybody."
+        st.markdown(f'<div class="kp-note">{sentence}</div>', unsafe_allow_html=True)
+
+        _fund_line("In the bank", status.bank)
+        if status.cash:
+            _fund_line("Cash", status.cash)
+        if owed_in > 0:
+            _fund_line("Owed by the house", owed_in)
+        elif owed_in < 0:
+            _fund_line("Owed to the house", owed_in)
+
+
 def render_balances(service: SheetsService, worksheet_name: str, room: str) -> None:
     """Everyone's balance, the people furthest behind first."""
+    render_fund_summary(service, worksheet_name)
+
     accounts = [
         entry
         for entry in data.personal_accounts(service, worksheet_name)
@@ -63,13 +114,14 @@ def render_balances(service: SheetsService, worksheet_name: str, room: str) -> N
         return
 
     owing = [entry for entry in accounts if entry.balance < 0]
-    total_owed = sum(entry.balance for entry in owing)
     if owing:
-        st.caption(
-            f"{len(owing)} of {len(accounts)} owe the kitchen fund, "
-            f"{_format_amount_dkk(abs(total_owed))} in total."
-        )
+        # Deliberately no total here: this counts only the people who are
+        # behind, while the card above nets credits against debts. Two similar
+        # sentences carrying different numbers is how people stop trusting both.
+        st.markdown("###### Everyone")
+        st.caption(f"{len(owing)} of {len(accounts)} owe the kitchen fund.")
     else:
+        st.markdown("###### Everyone")
         st.caption("Nobody owes the kitchen fund right now.")
 
     for entry in sorted(accounts, key=lambda item: item.balance):

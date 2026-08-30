@@ -66,9 +66,11 @@ class _Stub:
 def _reset_turn_state():
     rollover._turn_attempts.clear()
     rollover._turn_errors.clear()
+    rollover._turn_completed.clear()
     yield
     rollover._turn_attempts.clear()
     rollover._turn_errors.clear()
+    rollover._turn_completed.clear()
 
 
 AUGUST = datetime(2026, 8, 29)
@@ -181,8 +183,13 @@ def test_the_automatic_turn_runs_at_most_once_per_month():
     assert rollover.turn_if_due(service, today=SEPTEMBER) is not None
     assert service.copied == [("September", 2026)]
 
-    # Even if the Log write did not take, the app must not keep carrying.
+    # Even if the Log write did not take, the app must not keep carrying — and
+    # not merely because the throttle is still warm, so expire it first. The
+    # throttle holds a timestamp and lapses after five minutes; it is there to
+    # stop a FAILING turn hammering the API, and cannot be what caps a
+    # successful one.
     service.log = []
+    rollover._turn_attempts.clear()
     assert rollover.turn_if_due(service, today=SEPTEMBER) is None
     assert service.copied == [("September", 2026)]
 
@@ -196,6 +203,21 @@ def test_a_failed_turn_is_remembered_and_not_retried_at_once():
     # A second page load a moment later must not hammer the API.
     rollover.turn_if_due(service, today=SEPTEMBER)
     assert rollover._turn_attempts
+    assert service.copied == []
+
+
+def test_a_failed_turn_is_tried_again_once_the_throttle_lapses():
+    """The cap is on SUCCESS, not on failure. A 503 on the 1st must not mean the
+    month stays shut until somebody notices the banner and opens it by hand."""
+    service = _Stub(fail_copy="The service is currently unavailable.")
+
+    assert rollover.turn_if_due(service, today=SEPTEMBER) is None
+
+    service.fail_copy = None
+    rollover._turn_attempts.clear()  # five minutes later
+
+    assert rollover.turn_if_due(service, today=SEPTEMBER) is not None
+    assert service.copied == [("September", 2026)]
 
 
 def test_strays_are_people_who_left_money_behind():

@@ -215,6 +215,13 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpaladd {{ gap: .4rem; }}
   .st-key-kpaladd button p {{ font-size: .85rem !important; }}
   .kp-mine {{ font-weight: 600; }}
+  /* The fund card's last row sits on the card's own border, where a hairline
+     dangles. These element containers ARE siblings, so :last-child works —
+     unlike :last-of-type on .kp-line itself, which once matched every line in
+     the app because each one is alone inside its own markdown container. */
+  .st-key-kpalfund [data-testid="stElementContainer"]:last-child .kp-line {{
+    border-bottom: 0;
+  }}
   /* the label above a copyable value on the pay-in card */
   .kp-field {{
     font-size: .68rem;

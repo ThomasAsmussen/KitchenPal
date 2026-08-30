@@ -124,6 +124,25 @@ on a personal screen:
   Known and deliberate: residents record their own payments, so the sheet's
   record of who has paid is a claim; the bank statement is the evidence. Making
   transfers easy makes that gap busier, not smaller.
+- The fund's own position opens House's Balances (render_fund_summary,
+  2026-08-30): the total, then the parts, the same shape as a person's
+  statement on Me because it answers the same question one level up. Read from
+  the STATUS box (AC35:AG39), matched on what each LABEL SAYS and never on a row
+  number, most specific marker first -- "Bankkonto" and "Køkkenkassen I alt"
+  must not be taken for each other. The sheet computes the total and the app
+  never recomputes it, exactly as on Me.
+  The residents' line is TURNED AROUND on screen and this is deliberate: the
+  sheet's total is bank + cash MINUS the combined balance, which is negative
+  while the house owes money, so printing it with its own sign beside a larger
+  total reads as an arithmetic error. Facing the fund, money the house owes is
+  money coming in -- "Owed by the house", positive -- and the two printed parts
+  add to the printed total. A test pins that identity.
+  No red/green here. That vocabulary means "what YOU owe" everywhere else in the
+  app, and the per-person list sits directly below; a total is not a debt.
+  The old "N of M owe the fund, X in total" caption lost its X, because that
+  summed only the people who are behind while the card nets credits against
+  debts -- two similar sentences carrying different numbers is how people stop
+  trusting both.
 - House: balances for everyone (worst first, your row bold), the cooking schedule,
   who can cook when, the ledgers, bugs and ideas, and Admin.
 - The ledgers (drinks, purchases, payments) are lists, not tables: each tab opens
@@ -252,10 +271,17 @@ are still moving. Neither is a step an admin performs:
   and [] are different answers, and treating "we could not read" as "not opened
   yet" is how August 2026 got carried five times in one evening on the
   production sheet. Any read can fail — a quota burst, a renamed worksheet.
-- The attempt marker is never cleared on success, so the automatic turn runs at
-  most ONCE per month per process. A genuine second run is a deliberate act
-  through "Open the month by hand". This is a convenience, not a correctness
-  mechanism, and it should never be able to loop.
+- Two different guards, and it matters which does what. _turn_attempts only
+  THROTTLES: it holds a timestamp and lapses after TURN_RETRY_SECONDS, so a
+  FAILED turn is tried again five minutes later -- a 503 on the 1st must not
+  leave the month shut until somebody notices the banner. The cap on SUCCESS is
+  _turn_completed, a set this process never empties, so the automatic turn runs
+  at most ONCE per month per process even if the Log starts lying again. (Until
+  2026-08-30 the cap was claimed of the throttle, which does not hold: the
+  original five carries were ~40 and ~20 minutes apart, which is a lapsed
+  throttle, not an absent one.) A genuine second run is a deliberate act through
+  "Open the month by hand", which calls open_month directly and is not capped.
+  This is a convenience, not a correctness mechanism, and it must never loop.
 - None of this appears on DEV: there is no July 2026 sheet, so August is
   nothing_to_carry and the whole path is skipped. Test the turn against a month
   that has a predecessor.
