@@ -8,6 +8,7 @@ from .sheets.feedback import FeedbackSheetsMixin
 from .sheets.models import (
     AccountStatement,
     AndetRow,
+    BankDetails,
     DayRow,
     DayToDayEntries,
     DaySummary,
@@ -62,6 +63,7 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
 
 __all__ = [
     "AccountStatement",
+    "BankDetails",
     "AndetRow",
     "DayRow",
     "DayToDayEntries",

@@ -1,3 +1,4 @@
+import re
 from ..constants import DANISH_MONTHS, ENGLISH_MONTHS, NON_PERSON_ACCOUNT_LABELS
 
 
@@ -161,3 +162,57 @@ def parse_month_sheet_name(worksheet_name: str) -> tuple[int, int] | None:
     except ValueError:
         return None
     return parsed_month_number, year
+
+
+# "REG.NR: 0400 KONTONR.: 4032345684" is what the sheet holds today, but the
+# cell is free text a treasurer maintains, so the labels are matched loosely.
+_ACCOUNT_LABEL = re.compile(
+    r"(?:konto\.?\s*nr|kontonr|account\s*(?:nr|no|number))\.?\s*:?", re.IGNORECASE
+)
+_NUMBER_RUN = re.compile(r"\d[\d\s.\-]*")
+
+
+def _digits_in(text: str) -> str:
+    match = _NUMBER_RUN.search(text or "")
+    return "".join(ch for ch in match.group(0) if ch.isdigit()) if match else ""
+
+
+def parse_bank_details(text) -> tuple[str, str, str] | None:
+    """(reg number, account number, the line as written) — or None if there is none.
+
+    Both numbers come back empty unless the account label was found AND there is
+    a number on each side of it. Half a guess is worse than none here: the app
+    shows the raw line instead, which is still correct and still copyable, and a
+    resident typing a wrong account number into a bank app is not recoverable.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    label = _ACCOUNT_LABEL.search(raw)
+    if label is None:
+        return "", "", raw
+    reg = _digits_in(raw[: label.start()])
+    account = _digits_in(raw[label.end() :])
+    if not reg or not account:
+        return "", "", raw
+    return reg, account, raw
+
+
+def find_bank_details(cells) -> tuple[str, str, str] | None:
+    """Pick the bank line out of the STATUS block.
+
+    The block also holds "Bankkonto" and "Kontantbeholdning", which are labels
+    for the fund's own figures and not somewhere to send money — and "Bankkonto"
+    would happily match a looser account-label pattern. What separates the real
+    line is that it carries an account number: eight digits or more, counted
+    across the whole line so that "4032 34 56 84" still qualifies. No STATUS
+    label has any digits at all.
+    """
+    for text in cells or []:
+        raw = str(text or "").strip()
+        if sum(character.isdigit() for character in raw) < 8:
+            continue
+        parsed = parse_bank_details(raw)
+        if parsed:
+            return parsed
+    return None

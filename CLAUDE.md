@@ -77,6 +77,46 @@ on a personal screen:
   "For someone else" pickers use too).
   Verified live: 300 DKK paid by one person and split three ways moved the balances
   by +200 / -100 / -100.
+- How to pay (2026-08-30): Me said what you owe and stopped, and the account
+  number was only in the spreadsheet -- the thing this app exists to spare
+  people from opening. A card under the balance, ONLY when you owe, carries the
+  three things a transfer needs: amount, account, and a message ("354 Philip" --
+  room first because the accounts are keyed on it, first name after because that
+  is what a human recognises on a bank statement). "Reg. nr." and "Kontonr."
+  stay Danish inside an English interface on purpose: they are the names of the
+  fields you are about to type into.
+  The details are READ, never typed twice: AC35:AC42 of the month sheet, with
+  the bank line found inside that block by carrying eight digits or more. Do not
+  pin its row -- the Andet growth moved this whole region by 11 rows once
+  already -- and do not match "konto" loosely, because "Bankkonto" one row above
+  is the fund's own figure and not somewhere to send money.
+  parse_bank_details returns the raw line when it cannot split reg from account,
+  and the card shows that instead. Half a guess is worse than none: a resident
+  who types a wrong account number into a bank app has no way back. An empty
+  cell means no card, never an error.
+  It only appears past 500 DKK (TRANSFER_REMINDER_THRESHOLD_DKK). Everybody's
+  balance dips negative in the ordinary course of a month -- dues on the 1st, a
+  dinner, a round of drinks -- and a card that turns up the day after somebody
+  eats is one people learn to scroll past. It is a nudge for a real debt.
+  The amount is EDITABLE, because paying part of a big balance is a normal thing
+  to do, and "I've transferred it" records what you actually chose rather than
+  the whole balance. Its widget key carries the amount owed, so a balance that
+  moved since you last looked resets the field instead of quietly offering a
+  stale number, while an amount you typed survives the reruns in between.
+  st.code carries the copy button, which is the whole reason the values are code
+  blocks -- but Streamlit reveals that button on HOVER, and a phone has none.
+  Measured on the running app it is visibility:hidden until then, so the one
+  affordance the card exists for was unreachable on the device everybody uses.
+  nav.page_styles pins it visible inside .st-key-kpalpay, via the toolbar being
+  the only div child of stCode (the other is the pre) -- never the emotion class.
+  "I've transferred it" opens the existing Pay in dialog with the amount already
+  in it: recording the payment is the step people forget, and the moment just
+  after the transfer is the only one they remember it in.
+  The house has no MobilePay number and does not expect one, so the deep-link
+  idea is dead rather than deferred -- do not rebuild it speculatively.
+  Known and deliberate: residents record their own payments, so the sheet's
+  record of who has paid is a claim; the bank statement is the evidence. Making
+  transfers easy makes that gap busier, not smaller.
 - House: balances for everyone (worst first, your row bold), the cooking schedule,
   who can cook when, the ledgers, bugs and ideas, and Admin.
 - The ledgers (drinks, purchases, payments) are lists, not tables: each tab opens
@@ -146,8 +186,19 @@ on a personal screen:
   that header, and the padding is what keeps the identity chip out from under
   them.
 - UI language: English interface, Danish content left as residents typed it, one word
-  per concept — dinner, host, signup, drinks, shared purchase, kitchen fund, balance.
-  Never "food club" or "madklub" in the interface.
+  per concept — dinner, host, signup, drinks, shared purchase, split bill, transfer,
+  kitchen fund, balance. Never "food club" or "madklub" in the interface.
+  "Shared cost" was renamed to SPLIT A BILL on 2026-08-30 and "Pay in" to TRANSFER.
+  The first was not a style change: "shared cost" and "shared purchase" were nearly
+  the same words for opposite mechanics — the fund pays a purchase back in full,
+  while a split bill is divided between a chosen few — and naming the split is what
+  tells them apart. Rename user-facing strings TOGETHER; half a rename is worse than
+  none. The sheet's own name for the block stays Andet, and so do the code names.
+- Drinks are counted in GLASSES of wine, not bottles. The app used to say "Bottles of
+  wine" and the sheet charges 9,50 kr a unit against 6,00 for a beer (AJ25/AK25),
+  which is a glass price — so anybody logging one bottle was under-reporting about
+  fivefold. The sheet's own header is just "Vin" and states no unit; the unit lives
+  in the price row.
 - Money carries its direction in colour: kp-good (green) when the fund owes you,
   kp-owed (red) when you owe it, on the balance itself, on every line of the
   statement, and in House's list. It is the one number people open the app for.

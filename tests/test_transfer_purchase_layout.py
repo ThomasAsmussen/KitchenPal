@@ -65,3 +65,10 @@ def test_account_table_starts_one_row_below_its_header():
     assert search.startswith("A") and ":" in search
     first, last = search.split(":")
     assert int(first[1:]) < start <= int(last[1:]) + 1
+
+
+def test_the_bank_block_covers_the_status_box_and_the_line_below_it():
+    """The bank line is found inside this block by what it says, so the block
+    only has to CONTAIN row 42 — but it must not reach row 43, which is the
+    payment table header, or row 34 and above, which is Indkøb."""
+    assert constants.KITCHEN_FUND_BANK_RANGE == "AC35:AC42"

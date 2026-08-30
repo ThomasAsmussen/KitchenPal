@@ -33,7 +33,7 @@ SECTION_KEY = "house_section"
 SECTIONS = [
     ("balances", "Balances", ":material/account_balance_wallet:", "What everyone owes the kitchen fund"),
     ("schedule", "Cooking schedule", ":material/restaurant:", "Who cooks this month"),
-    ("costs", "Shared costs", ":material/group:", "Dinners and buys with no date"),
+    ("costs", "Split bills", ":material/group:", "One person paid, several split it"),
     ("when", "Who can cook when", ":material/event_available:", "Everyone's answers for next month"),
     ("ledgers", "Drinks, purchases and payments", ":material/receipt_long:", "The full lists, and fixing a row"),
     ("ideas", "Bugs and ideas", ":material/lightbulb:", "What people have reported"),

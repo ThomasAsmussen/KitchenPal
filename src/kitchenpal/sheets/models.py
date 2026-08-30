@@ -120,3 +120,17 @@ class FeedbackEntry:
     title: str
     details: str
     status: str
+
+
+@dataclass(frozen=True)
+class BankDetails:
+    """Where to send money to the kitchen fund.
+
+    `text` is the cell exactly as a human wrote it and is always filled; the two
+    numbers are filled only when they could be told apart. A house maintains
+    that cell by hand, so the raw line is the fallback that always works.
+    """
+
+    reg_number: str
+    account_number: str
+    text: str

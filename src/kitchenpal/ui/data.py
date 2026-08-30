@@ -64,6 +64,11 @@ def planning_entries(_service, month_name: str, year: int):
 
 
 @st.cache_data(ttl=MONTH_TTL, show_spinner=False)
+def bank_details(_service, worksheet_name: str):
+    return _service.get_kitchen_fund_bank_details(worksheet_name)
+
+
+@st.cache_data(ttl=MONTH_TTL, show_spinner=False)
 def possible_days_limit(_service, month_name: str, year: int) -> str:
     return _service.get_possible_days_limit(month_name, year)
 
@@ -115,6 +120,7 @@ def clear_feedback() -> None:
 def clear_months() -> None:
     """A month sheet was created — the sheet list itself changed."""
     sheet_names.clear()
+    bank_details.clear()
     clear_people()
     clear_dinners()
     clear_money()

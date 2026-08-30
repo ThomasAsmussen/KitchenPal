@@ -15,6 +15,7 @@ from ..constants import (
     PURCHASE_LOOKUP_RANGE,
     PURCHASE_ROW_CAPACITY,
     TRANSACTION_ROW_CAPACITY,
+    TRANSFER_REMINDER_THRESHOLD_DKK,
 )
 from ..sheets.utils import is_occupied_account, is_room_label, ordinal, parse_month_sheet_name
 from ..sheets_service import DayRow, SheetsService
@@ -852,6 +853,94 @@ def _render_statement(statement, *, day_rows, room, drinks, purchases) -> None:
         )
 
 
+def _danish_amount(amount: float) -> str:
+    """342,50 — the decimal comma a Danish banking app expects to be pasted."""
+    return f"{amount:.2f}".replace(".", ",")
+
+
+def _transfer_message(room: str, name: str) -> str:
+    """What to put in the message field, so a bank line can be matched to a person.
+
+    Room first, because the accounts are keyed on it; first name after, because
+    that is what a human recognises when reading down a statement.
+    """
+    first = str(name or "").split()
+    return f"{room} {first[0]}" if first else str(room)
+
+
+def _copy_field(label: str, value: str) -> None:
+    """A label and the value under it, with Streamlit's own copy button.
+
+    st.code ships that button, which is the whole reason this is a code block
+    and not styled text: copying is the point, and it works on a phone without
+    a line of JavaScript.
+    """
+    st.markdown(f'<div class="kp-field">{_esc(label)}</div>', unsafe_allow_html=True)
+    st.code(value, language=None, wrap_lines=True)
+
+
+def render_transfer_card(service: SheetsService, context: DayToDayContext, statement, room: str) -> float | None:
+    """Where to send the money, at the moment the balance says you owe it.
+
+    Me answered "what do you owe" and then stopped, and the next question — where
+    do I send it? — could only be answered by opening the spreadsheet, which is
+    the thing this app exists to spare people. A transfer needs three things: an
+    amount, an account and something in the message field, so all three are here
+    and each one copies with a tap.
+
+    Only past TRANSFER_REMINDER_THRESHOLD_DKK. Everybody dips negative in the
+    ordinary course of a month, and a card that appears the day after somebody
+    eats is one people learn to scroll past.
+
+    Returns the amount to record when the person says they have transferred it,
+    and None otherwise — the amount is theirs to change, because paying part of
+    a big balance is a normal thing to do.
+    """
+    if statement is None or -statement.balance <= TRANSFER_REMINDER_THRESHOLD_DKK:
+        return False
+    bank = data.bank_details(service, context.selected_sheet_name)
+    if bank is None:
+        return False
+
+    owed = abs(statement.balance)
+    with st.container(border=True, key="kpalpay"):
+        st.markdown('<div class="kp-kicker">How to pay</div>', unsafe_allow_html=True)
+        st.caption("Bank transfer to the kitchen fund.")
+        # Keyed on the amount owed, so a balance that has moved since you last
+        # looked resets the field instead of quietly offering a stale number —
+        # while an amount you typed yourself survives every rerun in between.
+        st.markdown('<div class="kp-field">Amount</div>', unsafe_allow_html=True)
+        amount = st.number_input(
+            "Amount to transfer",
+            label_visibility="collapsed",
+            min_value=0.0,
+            value=float(f"{owed:.2f}"),
+            step=50.0,
+            key=f"kpal_transfer_amount_{context.selected_sheet_name}_{room}_{owed:.2f}",
+        )
+        st.code(_danish_amount(amount), language=None, wrap_lines=True)
+        if bank.reg_number and bank.account_number:
+            # Danish labels inside an English interface, deliberately: these two
+            # are the names of the fields you are about to type into.
+            with st.container(horizontal=True, key="kpalpaynos"):
+                with st.container():
+                    _copy_field("Reg. nr.", bank.reg_number)
+                with st.container():
+                    _copy_field("Kontonr.", bank.account_number)
+        else:
+            _copy_field("Account", bank.text)
+        _copy_field("Message", _transfer_message(room, statement.name))
+        st.caption("Pay all of it or part of it — the amount above is what you owe right now.")
+        if st.button(
+            "I've transferred it",
+            key="kpal_transferred",
+            icon=":material/check:",
+            width="stretch",
+        ):
+            return float(amount)
+    return None
+
+
 @st.dialog("Add drinks")
 def _drinks_dialog(service: SheetsService, context: DayToDayContext, room: str) -> None:
     add_drinks_form(service, context, room)
@@ -867,7 +956,7 @@ def _payment_dialog(service: SheetsService, context: DayToDayContext, room: str)
     add_payment_form(service, context, room)
 
 
-@st.dialog("Add a shared cost")
+@st.dialog("Split a bill")
 def _andet_dialog(service: SheetsService, context: DayToDayContext, room: str, entry=None) -> None:
     add_andet_form(service, context, room, entry)
 
@@ -1013,7 +1102,7 @@ def _edit_drinks_dialog(service: SheetsService, context: DayToDayContext, entry)
             key=f"edit_drinks_beer_{entry.row_number}",
         )
         wine = st.number_input(
-            "Bottles of wine",
+            "Glasses of wine",
             min_value=0,
             step=1,
             value=int(entry.wine),
@@ -1138,7 +1227,7 @@ def _delete_control(kind: str, context: DayToDayContext, row_number: int, noun: 
 
 
 def _render_my_rows(service: SheetsService, context: DayToDayContext, room: str) -> None:
-    """Your own purchases, payments and shared costs — everyone else's live under House."""
+    """Your own purchases, transfers and split bills — everyone else's live under House."""
     purchases = [entry for entry in context.month_entries.purchases if entry.room == room]
     payments = [entry for entry in context.month_entries.transactions if entry.room == room]
     shared = [entry for entry in data.andet_rows(service, context.selected_sheet_name) if entry.payer == room]
@@ -1166,11 +1255,11 @@ def _render_my_rows(service: SheetsService, context: DayToDayContext, room: str)
         )
     for entry in shared:
         _my_row(
-            f"{entry.description or 'Shared cost'} · {entry.head_count} "
+            f"{entry.description or 'Split bill'} · {entry.head_count} "
             f"{'person' if entry.head_count == 1 else 'people'}",
             f"+{_format_amount_dkk(entry.amount)}",
             key=f"andet_{entry.row_number}",
-            help_text="Edit or delete this shared cost",
+            help_text="Edit or delete this split bill",
             on_edit=_andet_dialog,
             args=(service, context, room, entry),
         )
@@ -1200,14 +1289,21 @@ def render_me_view(service: SheetsService):
         )
 
     if room:
+        transferred = render_transfer_card(service, context, statement, room)
+        if transferred is not None:
+            # Recording it is the step people forget, and the moment just after
+            # the transfer is the only one they will ever remember it in.
+            st.session_state["tx_amount"] = transferred
+            _payment_dialog(service, context, room)
+
         with st.container(horizontal=True, key="kpaladd"):
             if st.button("Drinks", icon=":material/local_bar:", width="stretch"):
                 _drinks_dialog(service, context, room)
             if st.button("Purchase", icon=":material/receipt_long:", width="stretch"):
                 _purchase_dialog(service, context, room)
-            if st.button("Pay in", icon=":material/savings:", width="stretch"):
+            if st.button("Transfer", icon=":material/savings:", width="stretch"):
                 _payment_dialog(service, context, room)
-            if st.button("Shared cost", icon=":material/group:", width="stretch"):
+            if st.button("Split a bill", icon=":material/group:", width="stretch"):
                 _andet_dialog(service, context, room)
 
         _render_my_rows(service, context, room)
@@ -1300,8 +1396,8 @@ def add_andet_form(service: SheetsService, context: DayToDayContext, room: str, 
                 f"{len(people)} {'person' if len(people) == 1 else 'people'}"
                 f" · {_format_amount_dkk(amount / len(people))} each"
             )
-        save = st.form_submit_button("Save shared cost", type="primary", width="stretch")
-        remove = st.form_submit_button("Delete this cost", width="stretch") if entry is not None else False
+        save = st.form_submit_button("Save this split", type="primary", width="stretch")
+        remove = st.form_submit_button("Delete this split", width="stretch") if entry is not None else False
 
     if save:
         if amount <= 0:
@@ -1318,13 +1414,13 @@ def add_andet_form(service: SheetsService, context: DayToDayContext, room: str, 
                 row_number=entry.row_number if entry is not None else None,
             )
         except ValueError as exc:
-            show_user_error(st, exc, "Could not save the shared cost")
+            show_user_error(st, exc, "Could not save the split bill")
             return
     elif remove:
         try:
             service.clear_andet(context.selected_sheet_name, entry.row_number, context.room_entries)
         except ValueError as exc:
-            show_user_error(st, exc, "Could not delete the shared cost")
+            show_user_error(st, exc, "Could not delete the split bill")
             return
     else:
         return
@@ -1336,17 +1432,17 @@ def add_andet_form(service: SheetsService, context: DayToDayContext, room: str, 
 def render_andet_list(service: SheetsService, context: DayToDayContext, room: str) -> None:
     rows = data.andet_rows(service, context.selected_sheet_name)
     if not rows:
-        st.caption("No shared costs this month.")
+        st.caption("No split bills this month.")
         return
 
     room_display = _room_display_factory(context.room_name_by_label)
-    st.caption(f"{len(rows)} of {ANDET_ROW_CAPACITY} shared cost rows used this month.")
+    st.caption(f"{len(rows)} of {ANDET_ROW_CAPACITY} split bills used this month.")
     for entry in rows:
         mine = room and room in entry.participants
         note = f"{_format_amount_dkk(entry.share)} each" if entry.head_count else "—"
         st.markdown(
             f'<div class="kp-line{" kp-mine" if mine else ""}">'
-            f"<span>{entry.description or 'Shared cost'} · {room_display(entry.payer)} paid "
+            f"<span>{entry.description or 'Split bill'} · {room_display(entry.payer)} paid "
             f"{_format_amount_dkk(entry.amount)} · {entry.head_count} "
             f"{'person' if entry.head_count == 1 else 'people'}</span>"
             f'<span class="kp-note">{note}</span></div>',
@@ -1359,7 +1455,7 @@ def add_drinks_form(service: SheetsService, context: DayToDayContext, room: str)
     target_room = _who_is_this_for(context, "drinks", room)
     with st.form(key="drinks_form"):
         beer_quantity = st.number_input("Beers or sodas", min_value=0, step=1, key="drinks_beer")
-        wine_quantity = st.number_input("Bottles of wine", min_value=0, step=1, key="drinks_wine")
+        wine_quantity = st.number_input("Glasses of wine", min_value=0, step=1, key="drinks_wine")
         st.caption("These are added to the running total for the month.")
         submitted = st.form_submit_button("Add drinks", type="primary", width="stretch")
 
@@ -1390,7 +1486,7 @@ def _drink_summary(beer: int, wine: int) -> str:
     if beer:
         parts.append(f"{beer} beer/soda")
     if wine:
-        parts.append(f"{wine} wine")
+        parts.append(f"{wine} glass{'es' if wine != 1 else ''} of wine")
     return " · ".join(parts) or "None"
 
 
@@ -1441,7 +1537,14 @@ def _table_usage_caption(used: int, capacity: int, noun: str) -> str:
 def add_purchase_form(service: SheetsService, context: DayToDayContext, room: str):
     purchase_room = _who_is_this_for(context, "purchase", room)
     with st.form(key="purchase_form"):
-        purchase_item = st.text_input("What was bought?", key="purchase_item")
+        st.caption(
+            "Something you bought that the whole house uses — coffee, dish soap, foil, "
+            "bin bags, cleaning things. The fund pays you back in full. Your own groceries "
+            "are not this — a bill to split between a few of you is Split a bill."
+        )
+        purchase_item = st.text_input(
+            "What was bought?", key="purchase_item", placeholder="Coffee, dish soap, foil…"
+        )
         purchase_date = st.date_input("Date", key="purchase_date")
         purchase_cost = st.number_input(
             "Total price (negative for refunds like pant)", step=0.01, key="purchase_cost"

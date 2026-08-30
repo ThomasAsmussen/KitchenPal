@@ -215,6 +215,32 @@ def page_styles(active_slug: str) -> str:
   .st-key-kpaladd {{ gap: .4rem; }}
   .st-key-kpaladd button p {{ font-size: .85rem !important; }}
   .kp-mine {{ font-weight: 600; }}
+  /* the label above a copyable value on the pay-in card */
+  .kp-field {{
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: {idle};
+    font-weight: 600;
+    margin: .35rem 0 -.35rem;
+  }}
+  /* the numbers are short: a code block sized for source is all padding */
+  .st-key-kpalpay [data-testid="stCode"] {{ margin-bottom: 0; }}
+  .st-key-kpalpay [data-testid="stCode"] pre {{ padding: .4rem .6rem; }}
+  .st-key-kpalpay [data-testid="stCode"] code {{ font-size: .95rem; }}
+  /* Streamlit reveals a code block's copy button on HOVER, which a phone does
+     not have: measured on the running app it is visibility:hidden;opacity:0
+     until then, so the one affordance this card exists for was unreachable on
+     the device most residents use. The toolbar is the only div child of
+     stCode (the other is the pre), so it can be pinned without touching a
+     generated class name. */
+  .st-key-kpalpay [data-testid="stCode"] > div {{
+    visibility: visible !important;
+    opacity: 1 !important;
+  }}
+  /* reg. nr. and kontonr. are two fields of one number — keep them on one row */
+  .st-key-kpalpaynos {{ gap: .5rem; }}
+  .st-key-kpalpaynos > div {{ flex: 1 1 0; min-width: 0; }}
   /* a personal to-do above the fold. Accented, not a second grey caption:
      it sits beside the house's own status line, and two greys stacked read
      as one paragraph that nobody's eye separates. */

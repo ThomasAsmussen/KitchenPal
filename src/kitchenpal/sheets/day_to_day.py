@@ -219,7 +219,7 @@ class DayToDaySheetsMixin:
         marked account one share and credits the payer the full amount.
         """
         if not str(description).strip():
-            raise ValueError("Say what the shared cost was.")
+            raise ValueError("Say what the split bill was for.")
         if not participants:
             raise ValueError("Pick at least one person to share the cost.")
 
@@ -235,12 +235,12 @@ class DayToDaySheetsMixin:
             free = [row for row in range(ANDET_FIRST_ROW, ANDET_LAST_ROW + 1) if row not in taken]
             if not free:
                 raise ValueError(
-                    f"All {ANDET_ROW_CAPACITY} shared cost rows for {worksheet_name} are in use. "
+                    f"All {ANDET_ROW_CAPACITY} split-bill rows for {worksheet_name} are in use. "
                     "Delete one before adding another."
                 )
             row_number = free[0]
         elif not ANDET_FIRST_ROW <= row_number <= ANDET_LAST_ROW:
-            raise ValueError("That row is not a shared cost row.")
+            raise ValueError("That row is not a split-bill row.")
 
         worksheet = self.get_worksheet(worksheet_name)
         updates = [
@@ -393,7 +393,7 @@ class DayToDaySheetsMixin:
 
     def clear_andet(self, worksheet_name: str, row_number: int, room_entries: List[RoomEntry]) -> None:
         if not ANDET_FIRST_ROW <= row_number <= ANDET_LAST_ROW:
-            raise ValueError("That row is not a shared cost row.")
+            raise ValueError("That row is not a split-bill row.")
         worksheet = self.get_worksheet(worksheet_name)
         updates = [
             {"range": rowcol_to_a1(row_number, DAY_SHEET_CHEF_COLUMN), "values": [[""]]},

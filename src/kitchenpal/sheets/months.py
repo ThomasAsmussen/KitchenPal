@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from ..constants import (
     DAY_SHEET_SIGNUP_HEADER_RANGE,
     ENGLISH_MONTHS,
+    KITCHEN_FUND_BANK_RANGE,
     MONTH_METADATA_RANGE,
     PERSONAL_ACCOUNT_HEADER_LABEL,
     PERSONAL_ACCOUNT_HEADER_SEARCH_RANGE,
@@ -15,7 +16,9 @@ from ..constants import (
     PERSONAL_ACCOUNT_TRANSACTION_TOTAL_RANGE,
 )
 from ..a1 import range_start_row as _range_start_row
+from .models import BankDetails
 from .utils import (
+    find_bank_details as _find_bank_details,
     first_cell_value as _first_cell_value,
     format_room_label as _format_room_label,
     is_data_room_label as _is_data_room_label,
@@ -67,6 +70,20 @@ class MonthSheetsMixin:
             end_row = PERSONAL_ACCOUNT_TABLE_START_ROW + len(values) - 1
             updates.append({"range": f"B{PERSONAL_ACCOUNT_TABLE_START_ROW}:B{end_row}", "values": values})
         worksheet.batch_update(updates)
+
+    def get_kitchen_fund_bank_details(self, worksheet_name: str) -> BankDetails | None:
+        """Where to transfer money to the fund, as the sheet has it.
+
+        None when the cell is empty: a house that has not filled it in should
+        see the app work, not an error.
+        """
+        worksheet = self.get_worksheet(worksheet_name)
+        rows = worksheet.batch_get([KITCHEN_FUND_BANK_RANGE])[0]
+        found = _find_bank_details(row[0] if row else "" for row in rows)
+        if found is None:
+            return None
+        reg, account, text = found
+        return BankDetails(reg_number=reg, account_number=account, text=text)
 
     def check_month_sheet_integrity(self, worksheet_name: str) -> list[str]:
         # Month sheets are made by hand, and every range the app reads is a row

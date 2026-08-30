@@ -178,6 +178,18 @@ POSSIBLE_DAYS_HEADER_RANGE = "A1:C1"
 POSSIBLE_DAYS_HEADERS = ["Year", "Month", "Limit days"]
 MONTH_METADATA_RANGE = "AS3:AT3"
 
+# The STATUS box and the kitchen fund's bank line share one block (labels in AC,
+# amounts in AG). The bank line is found INSIDE this block by what it says, not
+# pinned to its row: the Andet block grew by 11 rows on 2026-08-29 and pushed
+# this whole region down with it.
+KITCHEN_FUND_BANK_RANGE = "AC35:AC42"
+
+# Below this, the app says nothing about transferring. Everybody's balance dips
+# negative in the ordinary course of a month — dues on the 1st, a dinner, a
+# round of drinks — and a card that appears every time somebody eats is a card
+# people learn to scroll past. It is a nudge for a real debt, not a receipt.
+TRANSFER_REMINDER_THRESHOLD_DKK = 500
+
 NEW_FEATURES_SHEET_NAME = "New Features"
 BUGS_SHEET_NAME = "Bugs"
 FEEDBACK_HEADER_RANGE = "A1:E1"
