@@ -110,3 +110,106 @@ def test_choosing_a_room_shuts_the_panel():
     assert not at.exception
     assert at.session_state[ROOM_POPOVER_KEY] is False
     assert _room_param(at) == "346"
+
+
+def _cookie_app():
+    """The identity screen, with a cookie the browser 'sent' with the request.
+
+    AppTest has no cookie support and st.context needs a real request behind
+    it, so the script swaps in a stand-in and puts the real one back — this
+    runs in the pytest process, and leaving it would follow every later test.
+    """
+    import streamlit as st
+
+    from kitchenpal.sheets_service import RoomEntry
+    from kitchenpal.ui import identity
+
+    class FakeContext:
+        def __init__(self, cookies):
+            self._cookies = cookies
+
+        @property
+        def cookies(self):
+            if self._cookies == "explode":
+                raise RuntimeError("no request context")
+            return self._cookies
+
+    rooms = [
+        RoomEntry(label="346", name="Julia", account_row=56, signup_column=9),
+        RoomEntry(label="350", name="Josefine", account_row=60, signup_column=13),
+    ]
+
+    written = []
+    real_context = st.context
+    real_writer = identity._write_room_cookie
+    identity._write_room_cookie = lambda value, max_age: written.append((value, max_age))
+    cookies = st.session_state.get("cookies", {})
+    st.context = FakeContext(cookies) if cookies is not None else real_context
+    try:
+        room = identity.current_room(rooms)
+        if room:
+            identity.render_identity_chip(rooms, room)
+        st.session_state["claimed"] = room
+        st.session_state["written"] = list(written)
+    finally:
+        st.context = real_context
+        identity._write_room_cookie = real_writer
+
+
+def _run_cookie_app(cookies, **state):
+    at = AppTest.from_function(_cookie_app)
+    at.session_state["cookies"] = cookies
+    for key, value in state.items():
+        at.session_state[key] = value
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+class TestTheBrowserRemembersYou:
+    """Residents were re-picking their room on every visit: the claim only
+    lived in the URL and in the session, so a bookmark worked and a fresh
+    visit did not."""
+
+    def test_a_cookie_answers_the_question_so_nobody_is_asked_again(self):
+        at = _run_cookie_app({"kitchenpal_room": "350"})
+
+        assert at.session_state["claimed"] == "350"
+
+    def test_a_shared_link_still_wins_over_the_cookie(self):
+        """Otherwise a link somebody sent you would quietly rewrite itself to
+        your own room."""
+        at = AppTest.from_function(_cookie_app)
+        at.session_state["cookies"] = {"kitchenpal_room": "350"}
+        at.query_params["room"] = "346"
+        at.run()
+
+        assert at.session_state["claimed"] == "346"
+
+    def test_a_room_that_has_left_the_house_is_ignored(self):
+        """People move out. A cookie naming a room that is no longer on the
+        sheet has to fall back to asking, not to a room nobody lives in."""
+        at = _run_cookie_app({"kitchenpal_room": "999"})
+
+        assert at.session_state["claimed"] == ""
+
+    def test_no_cookie_at_all_is_not_an_error(self):
+        assert _run_cookie_app({}).session_state["claimed"] == ""
+
+    def test_a_context_that_cannot_be_read_is_not_an_error(self):
+        """st.context needs a real request behind it, and a page can render
+        without one. Not knowing who you are is a question, never a crash."""
+        at = _run_cookie_app("explode")
+
+        assert at.session_state["claimed"] == ""
+
+    def test_the_cookie_is_written_once_per_session(self):
+        at = _run_cookie_app({"kitchenpal_room": "350"})
+
+        assert at.session_state["written"] == [("350", identity.ROOM_COOKIE_MAX_AGE)]
+
+        at.run()
+
+        # Already in the browser: rendering the iframe again on every run would
+        # cost an element on every page for nothing.
+        assert at.session_state["written"] == []

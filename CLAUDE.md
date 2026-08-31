@@ -275,8 +275,30 @@ on a personal screen:
   diagnosed as Streamlit's and papered over with a more specific selector before
   anyone read our own stylesheet to the end. Check what is already there before
   out-specifying somebody else.
-- ui/identity.py asks once which room you are and keeps it in the query string, so a
-  bookmark remembers you. Choosing a room CLOSES the panel: a popover does not
+- ui/identity.py asks once which room you are and then stops asking. The claim
+  lives in TWO places (2026-08-31): the query string, so a shared link carries
+  it, and a COOKIE, so opening the app fresh still knows you. Residents were
+  re-picking on every visit — the URL only helps somebody who bookmarked it.
+  Resolution order is url, then session, then cookie: the URL must win, or a
+  link somebody sent you would quietly rewrite itself to your own room.
+  st.context.cookies is READ-only — the server sees what the browser sent and
+  cannot send anything back — so the WRITE happens in a components.v1.html
+  iframe, which Streamlit sandboxes with allow-same-origin (measured on the
+  running app), height=0 and no layout cost. It is rendered from
+  render_identity_chip, the one place that runs once per page, and only when
+  the room changed: current_room is called several times a run and would emit
+  an iframe each time.
+  SameSite is decided in the BROWSER, not here: Community Cloud serves the app
+  inside an iframe on its own host page, and a Lax cookie is not sent with a
+  cross-site frame, so on https it is written SameSite=None; Secure and on
+  local http it is Lax (None is rejected without Secure). What is stored is a
+  room number and identity is a claim with nothing locked to it, so a cookie
+  that travels with an embed gives nothing away.
+  A cookie naming a room that has left the house is ignored, an unreadable
+  st.context is not an error, and a browser that refuses the cookie outright —
+  Safari blocks third-party cookies flatly — simply gets the picker, which is
+  what happened before any of this. Verify after a deploy by opening the app's
+  bare URL in a new tab: it should not ask. Choosing a room CLOSES the panel: a popover does not
   close because something inside it was clicked, and st.rerun() does not close
   it either. Its open state is a widget value — but only when it is stateful,
   and `is_stateful = on_change != "ignore"` in Streamlit's layouts.py, so the
