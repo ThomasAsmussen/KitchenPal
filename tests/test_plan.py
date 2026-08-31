@@ -176,3 +176,90 @@ def test_plan_says_nothing_extra_when_it_is_on_the_month_you_came_for():
 
     assert not at.exception
     assert not any("not ready to plan yet" in c.value for c in at.caption)
+
+
+def _schedule_card_script():
+    def script():
+        import streamlit as st
+
+        from kitchenpal.sheets.models import DayRow, RoomEntry
+        from kitchenpal.ui.month_setup import PlanningContext
+        from kitchenpal.ui.plan import render_schedule_card
+
+        entries = [
+            RoomEntry(label="346", name="Anna", account_row=56, signup_column=9),
+            RoomEntry(label="347", name="Bo", account_row=57, signup_column=10),
+        ]
+        rows = [
+            DayRow(
+                day=day,
+                chef={4: "346", 11: "347", 18: "346"}.get(day, ""),
+                menu="",
+                menu_description="",
+                signed_up=0,
+                meal_price=0.0,
+                signups={},
+            )
+            for day in range(1, 31)
+        ]
+
+        class Stub:
+            def get_room_entries(self, worksheet_name):
+                return entries
+
+            def get_day_rows(self, worksheet_name, room_entries):
+                return rows
+
+        context = PlanningContext(
+            year=2026,
+            month=9,
+            month_name="September",
+            sheet_name="September 2026",
+            room_entries=entries,
+            stored_entries={},
+            possible_days=list(range(1, 31)),
+            limit_days="",
+        )
+        st.session_state["drew"] = render_schedule_card(Stub(), context, entries[0], {})
+
+    return script
+
+
+def _run_schedule_card():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_schedule_card_script()).run()
+    assert not at.exception, at.exception
+    return at
+
+
+class TestSwappingFromPlan:
+    """Plan is where you look at next month's nights, and it used to answer
+    "ask an admin". Dinner opens on the month you are living in, so sending
+    people there to trade a night in the month they had just answered for was
+    a tab change and a month change to reach a control that fits here."""
+
+    def test_each_of_your_nights_can_be_swapped_where_it_is_shown(self):
+        at = _run_schedule_card()
+
+        keys = [button.key for button in at.button]
+        assert "edit_plannight_September 2026_4" in keys
+        assert "edit_plannight_September 2026_18" in keys
+        assert "edit_plannight_September 2026_11" not in keys  # that one is Bo's
+
+    def test_nobody_is_told_to_ask_an_admin(self):
+        at = _run_schedule_card()
+
+        captions = " ".join(block.value for block in at.caption)
+        assert "admin" not in captions.lower()
+        assert "hand a night over" in captions.lower()
+        helps = [button.help for button in at.button if button.help]
+        assert any("swap" in text.lower() for text in helps)
+
+    def test_the_swap_opens_on_the_month_being_planned(self):
+        at = _run_schedule_card()
+
+        at.button(key="edit_plannight_September 2026_4").click().run()
+
+        assert not at.exception
+        assert any("September 4th" in block.value for block in at.markdown)

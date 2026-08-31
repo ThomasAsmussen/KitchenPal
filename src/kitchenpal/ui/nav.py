@@ -211,6 +211,23 @@ def page_styles(active_slug: str) -> str:
   /* Me lists a handful of your own rows — hairlines there would be noise */
   [class*="st-key-kpalrow_my_"] .kp-line {{ border-bottom: 0; padding: .35rem 0; }}
 
+  /* Dinner's day bar: one step either way, and the calendar between them.
+     It sits above the title so that nothing which can change height is ever
+     over it — the whole point is that it holds still while the page under it
+     redraws. */
+  .st-key-kpaldaybar {{
+    gap: .4rem; align-items: center; margin-bottom: .2rem;
+    /* width="stretch" gives the middle button's container width:100%, and a
+       wrapping row then puts each arrow on a line of its own. */
+    flex-wrap: nowrap !important;
+  }}
+  .st-key-kpaldaybar > [data-testid="stElementContainer"] {{ flex: 0 0 auto; }}
+  .st-key-kpaldaybar > .st-key-kpal_day_open {{
+    flex: 1 1 auto; min-width: 0; width: auto !important;
+  }}
+  .st-key-kpaldaybar button {{ min-height: 2.5rem; }}
+  .st-key-kpal_day_open button p {{ font-weight: 600; }}
+
   /* the three add buttons on Me sit on one row, never stacked */
   .st-key-kpaladd {{ gap: .4rem; }}
   .st-key-kpaladd button p {{ font-size: .85rem !important; }}
@@ -232,22 +249,25 @@ def page_styles(active_slug: str) -> str:
     margin: .35rem 0 -.35rem;
   }}
   /* the numbers are short: a code block sized for source is all padding */
-  .st-key-kpalpay [data-testid="stCode"] {{ margin-bottom: 0; }}
-  .st-key-kpalpay [data-testid="stCode"] pre {{ padding: .4rem .6rem; }}
-  .st-key-kpalpay [data-testid="stCode"] code {{ font-size: .95rem; }}
+  [class*="st-key-kpalpay"] [data-testid="stCode"] {{ margin-bottom: 0; }}
+  /* the copy button floats over the right-hand end of the block, and reg./
+     kontonr. sit in half-width columns inside the payment dialog, where the
+     account number reached under it. Reserve the button's own width. */
+  [class*="st-key-kpalpay"] [data-testid="stCode"] pre {{ padding: .4rem 2.2rem .4rem .6rem; }}
+  [class*="st-key-kpalpay"] [data-testid="stCode"] code {{ font-size: .95rem; }}
   /* Streamlit reveals a code block's copy button on HOVER, which a phone does
      not have: measured on the running app it is visibility:hidden;opacity:0
      until then, so the one affordance this card exists for was unreachable on
      the device most residents use. The toolbar is the only div child of
      stCode (the other is the pre), so it can be pinned without touching a
      generated class name. */
-  .st-key-kpalpay [data-testid="stCode"] > div {{
+  [class*="st-key-kpalpay"] [data-testid="stCode"] > div {{
     visibility: visible !important;
     opacity: 1 !important;
   }}
   /* reg. nr. and kontonr. are two fields of one number — keep them on one row */
-  .st-key-kpalpaynos {{ gap: .5rem; }}
-  .st-key-kpalpaynos > div {{ flex: 1 1 0; min-width: 0; }}
+  [class*="st-key-kpalpaynos_"] {{ gap: .5rem; }}
+  [class*="st-key-kpalpaynos_"] > div {{ flex: 1 1 0; min-width: 0; }}
   /* a personal to-do above the fold. Accented, not a second grey caption:
      it sits beside the house's own status line, and two greys stacked read
      as one paragraph that nobody's eye separates. */

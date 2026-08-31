@@ -211,3 +211,76 @@ class TestChangingTheAmount:
         at = _run_card(-1306.73)
 
         assert at.session_state["returned"] is None
+
+
+def _payment_form_script():
+    def script():
+        import streamlit as st
+
+        from kitchenpal.sheets.models import RoomEntry
+        from kitchenpal.ui.day_to_day import DayToDayContext, add_payment_form
+
+        class Stub:
+            def get_kitchen_fund_bank_details(self, worksheet_name):
+                return st.session_state["bank"]
+
+        entries = [
+            RoomEntry(label="354", name="Philip Andersen", account_row=64, signup_column=17),
+            RoomEntry(label="346", name="Anna", account_row=56, signup_column=9),
+        ]
+        context = DayToDayContext(
+            selected_sheet_name="August 2026",
+            room_entries=entries,
+            signup_room_entries=entries,
+            room_name_by_label={entry.label: entry.name for entry in entries},
+            room_labels=[entry.label for entry in entries],
+            signup_room_labels=[entry.label for entry in entries],
+        )
+        add_payment_form(Stub(), context, "354")
+
+    return script
+
+
+_DEFAULT = object()
+
+
+def _run_payment_form(bank=_DEFAULT):
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_payment_form_script())
+    at.session_state["bank"] = _bank() if bank is _DEFAULT else bank
+    at.run()
+    assert not at.exception
+    return at
+
+
+class TestTheAccountIsInThePaymentDialogToo:
+    """The card on Me only appears past 500 DKK, but people also open Kitchen
+    fund payment when they are about to pay — and the account number was still
+    only in the spreadsheet."""
+
+    def test_it_says_where_to_send_it(self):
+        at = _run_payment_form()
+
+        assert [block.value for block in at.code] == ["0400", "4032345684", "354 Philip"]
+
+    def test_the_message_follows_who_the_payment_is_for(self):
+        at = _run_payment_form()
+
+        at.toggle(key="payment_for_other").set_value(True).run()
+        at.selectbox(key="payment_who").set_value("346").run()
+
+        assert at.code[-1].value == "346 Anna"
+
+    def test_a_sheet_with_no_account_on_it_still_records_payments(self):
+        at = _run_payment_form(bank=None)
+
+        assert len(at.code) == 0
+        assert at.button[0]
+
+    def test_a_line_it_could_not_split_is_shown_whole(self):
+        from kitchenpal.sheets_service import BankDetails
+
+        at = _run_payment_form(BankDetails("", "", "Ask Thomas, reg 0400"))
+
+        assert [block.value for block in at.code] == ["Ask Thomas, reg 0400", "354 Philip"]

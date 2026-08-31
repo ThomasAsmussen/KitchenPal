@@ -1,4 +1,4 @@
-# Where we are (updated 2026-08-29)
+# Where we are (updated 2026-08-31)
 
 2026-08-29: the Andet block grew from 9 rows to 20 and pushed the account table to
 row 56 (see Sheet layout). Constants, capacity guards, integrity checks and tests
@@ -17,6 +17,11 @@ became a rollover checklist, and then the checklist itself was cut down to two
 questions once it turned out four of its six steps needed no human at all (see
 Admin and The month turns, below).
 
+2026-08-31, from the house's own feedback on the live app: Dinner's day picker
+stopped jumping (a bar at the top and a dialog, see App structure), Plan stopped
+telling people to ask an admin and grew the same swap Dinner has, and the
+Kitchen fund payment dialog now shows the account to send to.
+
 Next, in order:
 1. Deploy and run the three-task walkthrough with residents.
 2. Birthdays overview under House.
@@ -29,7 +34,9 @@ overview under House.
 
 DEV sheet state: rebuilt on 2026-08-29 with the new layout — August and September
 2026 only. The Log worksheet permanently contains demo rows from the 2026-08-05 and
-2026-08-29 end-to-end tests; real history from here on.
+2026-08-29 end-to-end tests; real history from here on. 349 was put down to cook
+10 September on 2026-08-31, deliberately: it is the only cook on DEV, and it is
+what makes Plan's schedule card and its swap testable in a browser.
 
 Manual tasks for Thomas (the app can't do these):
 - Mark fixed items Done in the production Bugs and New Features tabs.
@@ -62,6 +69,25 @@ Because the app knows who you are, no screen asks again and nothing house-wide s
 on a personal screen:
 - Dinner: tonight, one tap to eat, a guest stepper, your cooking nights. The host
   fields appear inline on your own night and behind one button on anyone else's.
+  Which day you are looking at is answered by a bar at the TOP (2026-08-31):
+  one step either way, and the month between them, opening a dialog that holds
+  the calendar AND the month picker. It was an expander at the bottom, under
+  everything it changes, and the house reported it "jumping around the page".
+  Three things moved at once on every tap: the expander collapsed (its open
+  state is not kept unless it is made stateful), the card, the host controls
+  and the two lists above it changed height, and the control slid out from
+  under the finger that had just used it. Nothing was slow -- every read on
+  that page is cached. Placing it above the title is the fix, not styling: the
+  title is one line whether it says "Tonight" or a date, so nothing over the
+  bar can change height and it cannot be pushed. Keep it there.
+  The dialog re-reads current_month_sheet on every run instead of taking the
+  month as an argument, because a dialog re-runs as a FRAGMENT with the
+  arguments it was opened with -- a captured month keeps drawing the month you
+  just left. Changing the month inside it redraws only the dialog; picking a
+  day sets DINNER_DAY_KEY in an on_click callback and st.rerun() closes the
+  dialog and redraws the page behind in one go. render_dinner_view also clears
+  DAY_PICKED_KEY defensively: when a click reruns the whole app instead of the
+  fragment, the dialog is not drawn and nothing else would.
 - Me: your balance, the parts behind it, your own purchases and payments (editable),
   and three buttons that open dialogs to add drinks, a purchase or a payment. Each
   form acts as you, with a "For someone else" toggle for covering a housemate.
@@ -107,8 +133,19 @@ on a personal screen:
   blocks -- but Streamlit reveals that button on HOVER, and a phone has none.
   Measured on the running app it is visibility:hidden until then, so the one
   affordance the card exists for was unreachable on the device everybody uses.
-  nav.page_styles pins it visible inside .st-key-kpalpay, via the toolbar being
-  the only div child of stCode (the other is the pre) -- never the emotion class.
+  nav.page_styles pins it visible inside [class*="st-key-kpalpay"], via the
+  toolbar being the only div child of stCode (the other is the pre) -- never
+  the emotion class. That toolbar FLOATS over the right-hand end of the block,
+  so the pre reserves its width as padding; without it a ten-digit account
+  number ran under the button.
+  The same three values open the Kitchen fund payment dialog (2026-08-31,
+  _render_bank_fields). The card only appears past the threshold, but people
+  also open that dialog when they are ABOUT to pay, and the account was still
+  only in the spreadsheet. Reg. nr. and Kontonr. sit side by side on the card
+  and STACKED in the dialog: measured at 390px two columns there leave ~90px
+  for a number that needs 91, and it broke across two lines. A bank account
+  split over a line break is worse than a taller card -- it is the one value
+  on the screen nobody can check by eye.
   "I've transferred it" ARMS a session flag that render_me_view pops
   (take_armed_transfer), and the card's own return value means only "was it
   drawn". They were one value once: the card returned `float | None` while two
@@ -159,6 +196,16 @@ on a personal screen:
   every one of them is last-of-type. Style siblings, not markdown-wrapped singletons.
 - The month is one shared choice (ui/month.py) for Dinner, Me and House. Plan keeps
   its own, because planning is about the month ahead, not the one you are living in.
+  MONTH_STATE_KEY is PLAIN session state and MONTH_PICKER_KEY is the selectbox
+  (2026-08-31). Streamlit deletes the state of a widget a run did not draw
+  (SessionState._remove_stale_widgets), one run late -- measured: the value
+  survives one hidden run and is gone on the second. The month used to BE the
+  widget's key, so it only lived while a picker was on screen; that is why
+  every page carried one, and House's Admin section, the one place that hides
+  it, silently reset the month after two runs. The plain value is not widget
+  state and is never collected, so the picker can be drawn once, anywhere,
+  including inside a dialog. Every picker shares one widget key so two of them
+  can never remember different answers.
 - app.py builds them with st.navigation(position="hidden") so each tab keeps a real
   URL, and ui/nav.py draws the visible bar pinned to the bottom. Streamlit's own top
   navigation collapses into a hamburger on a phone, which is the hiding we are
@@ -560,8 +607,14 @@ hold a dinner on are drawn flat and inert, which retired the "Possible dates:
   the write, so answering never moved the number underneath it.
 - Once cooks are written, Plan says which nights are yours and which of them you
   had asked for. Dinner shows the month you are living in; nothing showed next
-  month, which is the one you just answered about. NOT yet verified against a
-  live schedule -- no month on DEV has cooks written.
+  month, which is the one you just answered about. Verified live on 2026-08-31
+  against a cook written into September on DEV.
+- Each of those nights carries the SAME swap as Dinner (2026-08-31), and the
+  page no longer says "ask an admin to change a night" -- it never was an
+  admin's job. Sending people to Dinner instead would have cost a tab change
+  AND a month change, because Dinner opens on the month you are living in
+  while Plan is about the one after it. build_month_context on the planning
+  sheet adds no round trip: Plan has already read that sheet's people.
 
 Plan does not ask which month (2026-08-30). It was a 12-month dropdown crossed
 with a 3-year one -- 36 combinations against the two sheets that exist -- and

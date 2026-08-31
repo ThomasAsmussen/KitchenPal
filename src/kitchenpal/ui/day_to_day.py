@@ -256,14 +256,6 @@ def identity_room_entries(service: SheetsService):
     return [entry for entry in data.room_entries(service, sheet_name) if entry.label.isdigit() or entry.name]
 
 
-def _load_context(service: SheetsService, *, include_month_entries: bool) -> DayToDayContext | None:
-    selected_sheet_name = render_month_picker(service)
-    if selected_sheet_name is None:
-        st.warning("No month sheets are available yet.")
-        return None
-    return build_month_context(service, selected_sheet_name, include_month_entries=include_month_entries)
-
-
 def build_month_context(
     service: SheetsService, selected_sheet_name: str, *, include_month_entries: bool
 ) -> DayToDayContext | None:
@@ -384,6 +376,11 @@ def render_dinner_view(service: SheetsService):
     default_day = _default_day_for_sheet(sheet_name)
     if st.session_state.get(DINNER_DAY_KEY) not in days:
         st.session_state.pop(DINNER_DAY_KEY, None)
+    # The dialog normally eats this on the fragment rerun its own callback
+    # triggers. When the click reruns the whole app instead, the dialog is not
+    # drawn and nothing would clear it — and a flag left behind would shut the
+    # dialog the next time somebody opened it.
+    st.session_state.pop(DAY_PICKED_KEY, None)
     selected_day = st.session_state.get(DINNER_DAY_KEY, default_day)
 
     context = build_month_context(service, sheet_name, include_month_entries=False)
@@ -400,6 +397,10 @@ def render_dinner_view(service: SheetsService):
         DayRow(day=selected_day, chef="", menu="", menu_description="", signed_up=0, meal_price=0.0, signups={}),
     )
 
+    # Above the title, because nothing above it can change height: the bar is
+    # the one thing on this page that must not move when a day is chosen.
+    _render_day_bar(service, sheet_name, days, selected_day)
+
     showing_today = selected_day == default_day and is_current_month(sheet_name)
     st.title("Tonight" if showing_today else _day_display(sheet_name, selected_day))
     st.caption(
@@ -410,7 +411,6 @@ def render_dinner_view(service: SheetsService):
     _render_dinner_card(row)
     _render_cook_controls(service, context, sheet_name, selected_day, row, room)
     _render_signup_controls(service, context, sheet_name, selected_day, row, room)
-    _render_other_day_picker(service, sheet_name, days, selected_day, rows, room)
 
     upcoming = upcoming_dinners(rows, selected_day)
     if upcoming:
@@ -612,25 +612,109 @@ def _render_signup_controls(service, context, sheet_name, selected_day, row, roo
     )
 
 
+DAY_PICKED_KEY = "kpal_day_picked"
+
+
 def _pick_day(day: int) -> None:
     st.session_state[DINNER_DAY_KEY] = day
+    st.session_state[DAY_PICKED_KEY] = True
 
 
-def _render_other_day_picker(service, sheet_name, days, selected_day, rows, room) -> None:
+def _render_day_bar(service, sheet_name: str, days, selected_day: int) -> None:
+    """The day you are looking at, and the two either side of it — at the TOP.
+
+    This bar used to be an expander at the BOTTOM of the page, under everything
+    it changes. Tapping a day then did three disruptive things at once: the
+    expander collapsed (it was not stateful, so its open state was not kept),
+    the dinner card, the host controls and the two lists above it all changed
+    height, and the picker slid out from under the finger that had just used
+    it. Nothing was slow — every read is cached — it simply never stayed still.
+
+    Above the title, nothing that can change height sits over it, so the bar
+    holds its position through a change of day, and the page redraws underneath
+    it. One step either way is a button; any other day, and the month, are one
+    tap away in a dialog, which is anchored to the viewport rather than to the
+    page flow and so cannot move anything at all.
+    """
+    index = days.index(selected_day) if selected_day in days else 0
+    previous = days[index - 1] if index > 0 else None
+    following = days[index + 1] if index + 1 < len(days) else None
+
+    with st.container(horizontal=True, key="kpaldaybar"):
+        st.button(
+            "",
+            icon=":material/chevron_left:",
+            key="kpal_day_prev",
+            help="The day before",
+            disabled=previous is None,
+            on_click=_pick_day,
+            args=(previous,) if previous is not None else None,
+        )
+        if st.button(
+            _short_day(sheet_name, selected_day),
+            icon=":material/calendar_month:",
+            key="kpal_day_open",
+            width="stretch",
+            help="Another day, or another month",
+        ):
+            _day_dialog(service)
+        st.button(
+            "",
+            icon=":material/chevron_right:",
+            key="kpal_day_next",
+            help="The day after",
+            disabled=following is None,
+            on_click=_pick_day,
+            args=(following,) if following is not None else None,
+        )
+
+
+@st.dialog("Choose a day")
+def _day_dialog(service) -> None:
     """A month you can see, rather than a dropdown of numbers.
 
     The days somebody is cooking, the ones that are yours, and the one you are
     looking at are all visible at once — which is the question people actually
     bring to a day picker.
+
+    It reads the month from current_month_sheet on every run rather than taking
+    it as an argument: the month picker lives in here, and a dialog re-runs as
+    a fragment with the arguments it was OPENED with, so a captured month would
+    keep drawing the month you had just left.
     """
+    sheet_name = current_month_sheet(service)
+    if sheet_name is None:
+        st.caption("No month sheets are available yet.")
+        return
+
+    # Consumed on the fragment rerun a day button's callback triggers.
+    # st.rerun() closes the dialog and redraws the page behind it in one go.
+    if st.session_state.pop(DAY_PICKED_KEY, False):
+        st.rerun()
+
+    render_month_picker(service)
+
+    days = _valid_days_for_sheet(sheet_name)
+    selected_day = st.session_state.get(DINNER_DAY_KEY, _default_day_for_sheet(sheet_name))
     parsed = parse_month_sheet_name(sheet_name)
     if parsed is None:
-        with st.expander("Choose day"):
-            render_month_picker(service)
-            st.selectbox("Day", days, index=days.index(selected_day), key=DINNER_DAY_KEY)
+        # A sheet whose name we cannot read as a month has no calendar to draw.
+        # The fallback writes DINNER_DAY_KEY through a callback rather than
+        # owning it as a widget key: widget state is collected once the dialog
+        # stops drawing it, and the day would quietly go back to today.
+        st.selectbox(
+            "Day",
+            days,
+            index=days.index(selected_day),
+            key="kpal_day_fallback",
+            on_change=lambda: _pick_day(st.session_state["kpal_day_fallback"]),
+        )
         return
 
     month, year = parsed
+    rows = data.day_rows(service, sheet_name)
+    entries = data.room_entries(service, sheet_name)
+    room = current_room(entries)
     chef_by_day = {row.day: row.chef for row in rows}
     day_set = set(days)
 
@@ -645,24 +729,22 @@ def _render_other_day_picker(service, sheet_name, days, selected_day, rows, room
         # somebody has.
         return "cook" if chef_by_day.get(day) else "free"
 
-    with st.expander("Choose day"):
-        render_grid(
-            key=f"dinnerday_{sheet_name}",
-            year=year,
-            month=month,
-            day_state=state_for,
-            on_click=_pick_day,
-            args_for=lambda day: (day,),
-        )
-        st.markdown(
-            "<div class='kpal-legend'>"
-            "<span><i class='kpal-sw kpal-sw-mine'></i>your night</span>"
-            "<span><i class='kpal-sw kpal-sw-can'></i>someone is cooking</span>"
-            "<span><i class='kpal-sw kpal-sw-off'></i>nobody yet</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        render_month_picker(service)
+    render_grid(
+        key=f"dinnerday_{sheet_name}",
+        year=year,
+        month=month,
+        day_state=state_for,
+        on_click=_pick_day,
+        args_for=lambda day: (day,),
+    )
+    st.markdown(
+        "<div class='kpal-legend'>"
+        "<span><i class='kpal-sw kpal-sw-mine'></i>your night</span>"
+        "<span><i class='kpal-sw kpal-sw-can'></i>someone is cooking</span>"
+        "<span><i class='kpal-sw kpal-sw-off'></i>nobody yet</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 @st.dialog("Swap this dinner")
@@ -900,6 +982,38 @@ def _copy_field(label: str, value: str) -> None:
     st.code(value, language=None, wrap_lines=True)
 
 
+def _render_bank_fields(bank, room: str, name: str, *, stacked: bool = False) -> None:
+    """Where the money goes: the account, and what to put in the message.
+
+    Shared by the card on Me and by the Kitchen fund payment dialog, because
+    both are the same moment — one nudges you to pay, the other is where you
+    went to record it, and neither is any use if the account number is still
+    only in the spreadsheet.
+
+    Side by side on the card, which has the page's full width; stacked inside a
+    dialog, which does not. Measured at 390px, two columns there leave about
+    90px for the number once the copy button has its own space, and a ten-digit
+    account number is 91px — it broke across two lines. A bank account split
+    over a line break is worse than a taller card: it is the one value on this
+    screen nobody can sanity-check by eye.
+    """
+    if bank.reg_number and bank.account_number:
+        # Danish labels inside an English interface, deliberately: these two
+        # are the names of the fields you are about to type into.
+        if stacked:
+            _copy_field("Reg. nr.", bank.reg_number)
+            _copy_field("Kontonr.", bank.account_number)
+        else:
+            with st.container(horizontal=True, key=f"kpalpaynos_{room}"):
+                with st.container():
+                    _copy_field("Reg. nr.", bank.reg_number)
+                with st.container():
+                    _copy_field("Kontonr.", bank.account_number)
+    else:
+        _copy_field("Account", bank.text)
+    _copy_field("Message", _transfer_message(room, name))
+
+
 def render_transfer_card(service: SheetsService, context: DayToDayContext, statement, room: str) -> bool:
     """Where to send the money, at the moment the balance says you owe it.
 
@@ -941,17 +1055,7 @@ def render_transfer_card(service: SheetsService, context: DayToDayContext, state
             key=amount_key,
         )
         st.code(_danish_amount(amount), language=None, wrap_lines=True)
-        if bank.reg_number and bank.account_number:
-            # Danish labels inside an English interface, deliberately: these two
-            # are the names of the fields you are about to type into.
-            with st.container(horizontal=True, key="kpalpaynos"):
-                with st.container():
-                    _copy_field("Reg. nr.", bank.reg_number)
-                with st.container():
-                    _copy_field("Kontonr.", bank.account_number)
-        else:
-            _copy_field("Account", bank.text)
-        _copy_field("Message", _transfer_message(room, statement.name))
+        _render_bank_fields(bank, room, statement.name)
         st.caption("Pay all of it or part of it — the amount above is what you owe right now.")
         # Arms the flag rather than answering through this function's return
         # value, which is now only ever "was the card drawn". See
@@ -1644,8 +1748,36 @@ def render_purchase_ledger(service: SheetsService, context: DayToDayContext, roo
     st.caption(_table_usage_caption(len(entries), PURCHASE_ROW_CAPACITY, "purchase"))
 
 
+def _render_payment_bank_block(service: SheetsService, context: DayToDayContext, room: str) -> None:
+    """The account details above the payment form, when the sheet carries them.
+
+    Read, never typed twice, and an unreadable or empty cell simply means no
+    block — recording a payment must not depend on it.
+    """
+    if not room:
+        return
+    try:
+        bank = data.bank_details(service, context.selected_sheet_name)
+    except Exception:  # noqa: BLE001 - the form is the point; this is help
+        return
+    if bank is None:
+        return
+    with st.container(border=True, key="kpalpaydlg"):
+        st.markdown('<div class="kp-kicker">Where to send it</div>', unsafe_allow_html=True)
+        _render_bank_fields(bank, room, context.room_name_by_label.get(room, ""), stacked=True)
+
+
 def add_payment_form(service: SheetsService, context: DayToDayContext, room: str):
+    """Record a transfer — and, first, say where to send one.
+
+    People open this to write down a payment they have made, but they also open
+    it when they are about to make one, and the account number was only ever in
+    the spreadsheet. The card on Me carries the same three values, but it only
+    appears past TRANSFER_REMINDER_THRESHOLD_DKK; here there is no threshold,
+    because you have already said you are paying.
+    """
     transaction_room = _who_is_this_for(context, "payment", room)
+    _render_payment_bank_block(service, context, transaction_room)
     with st.form(key="transaction_form"):
         transaction_type = st.selectbox(
             "Payment type",

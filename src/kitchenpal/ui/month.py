@@ -14,6 +14,7 @@ from ..sheets.utils import parse_month_sheet_name
 from . import data
 
 MONTH_STATE_KEY = "kitchenpal_month"
+MONTH_PICKER_KEY = "kitchenpal_month_picker"
 
 
 def cached_sheet_names(service):
@@ -56,11 +57,40 @@ def is_current_month(worksheet_name: str) -> bool:
     return parse_month_sheet_name(worksheet_name) == (now.month, now.year)
 
 
+def _remember_month(picker_key: str) -> None:
+    st.session_state[MONTH_STATE_KEY] = st.session_state[picker_key]
+
+
 def render_month_picker(service, label: str = "Month") -> str | None:
-    """The one control that changes the month, wherever it is drawn."""
+    """The one control that changes the month, wherever it is drawn.
+
+    The chosen month is kept in MONTH_STATE_KEY, which is NOT the selectbox's
+    own key. Streamlit deletes the state of a widget that a run did not draw
+    (SessionState._remove_stale_widgets), so a month held in a widget key only
+    survives while something on screen keeps drawing that widget — which is why
+    every page used to carry a picker it did not need, and why House's Admin
+    section, the one place that hides it, silently reset the month. A plain
+    session-state value is not widget state and is never collected, so the
+    picker can now be drawn once, anywhere, including inside a dialog.
+
+    Every picker shares MONTH_PICKER_KEY so that they cannot disagree: two
+    pickers with different keys would each remember their own last answer and
+    show it back on a page where the app had moved on.
+    """
     sheets_list = available_months(service)
     if not sheets_list:
         return None
     current = current_month_sheet(service)
-    st.selectbox(label, sheets_list, index=sheets_list.index(current), key=MONTH_STATE_KEY)
+    if st.session_state.get(MONTH_PICKER_KEY) not in sheets_list:
+        # A sheet can disappear between runs; an option that is no longer there
+        # would otherwise be handed to the selectbox as its value.
+        st.session_state.pop(MONTH_PICKER_KEY, None)
+    st.selectbox(
+        label,
+        sheets_list,
+        index=sheets_list.index(current),
+        key=MONTH_PICKER_KEY,
+        on_change=_remember_month,
+        args=(MONTH_PICKER_KEY,),
+    )
     return st.session_state.get(MONTH_STATE_KEY, current)

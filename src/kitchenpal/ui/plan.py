@@ -23,7 +23,14 @@ import streamlit as st
 from ..runtime_state import bump_cache_version, get_cache_version
 from ..sheets_service import PlanningEntry, SheetsService
 from . import data
-from .day_to_day import _dinner_line, _ordinal, my_cooking_nights
+from .day_to_day import (
+    _dinner_line,
+    _ledger_row,
+    _ordinal,
+    _swap_dialog,
+    build_month_context,
+    my_cooking_nights,
+)
 from .errors import show_user_error
 from .month_setup import (
     ENGLISH_WEEKDAY_NAMES,
@@ -221,13 +228,36 @@ def render_schedule_card(service: SheetsService, context: PlanningContext, room_
         unsafe_allow_html=True,
     )
     st.caption(f"{context.month_name} {context.year} · the schedule is written")
+    # The swap dialog needs the month's people, and Plan has already read them
+    # for this sheet — build_month_context adds no round trip here.
+    day_context = build_month_context(service, context.sheet_name, include_month_entries=False)
     for row in mine:
         weekday = ENGLISH_WEEKDAY_NAMES[calendar.weekday(context.year, context.month, row.day)]
         note = "one you asked for" if row.day in preferred else ""
-        _dinner_line(f"{weekday} {row.day} {context.month_name}", note)
+        title = f"{weekday} {row.day} {context.month_name}"
+        if day_context is None:
+            _dinner_line(title, note)
+            continue
+        # The same swap as on Dinner, on the tab where you are looking at next
+        # month's nights. Dinner opens on the month you are living in, so
+        # sending people there to trade a night in the month they have just
+        # answered for was a tab change and a month change to reach a control
+        # that fits here.
+        _ledger_row(
+            title=title,
+            note=note,
+            key=f"plannight_{context.sheet_name}_{row.day}",
+            help_text="Swap this dinner with somebody",
+            on_edit=_swap_dialog,
+            args=(service, day_context, context.sheet_name, row.day, room_entry.label, rows),
+            icon=":material/swap_horiz:",
+        )
     if not mine:
         st.caption("Nobody put you down for a dinner this month.")
-    st.caption("Ask an admin to change a night.")
+    else:
+        st.caption(
+            "Use the arrows to hand a night over, or trade it for one of theirs."
+        )
     return True
 
 
