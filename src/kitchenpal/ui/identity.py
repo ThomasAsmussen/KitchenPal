@@ -9,6 +9,7 @@ rooms, and every form still shows the room it will write to.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -68,51 +69,87 @@ def current_room(room_entries) -> str:
     return claimed
 
 
-def _write_room_cookie(value: str, max_age: int) -> None:
-    """Set the cookie from the browser, because Streamlit cannot.
+ROOM_STORAGE_KEY = "kitchenpal_room"
+REDIRECT_TRIED_KEY = "kitchenpal_room_redirected"
 
-    st.context.cookies is READ-only: the server sees what the browser sent and
-    has no way to send anything back. So the write happens in a component
-    iframe, which Streamlit sandboxes with allow-same-origin — measured on the
-    running app — so a cookie it sets belongs to the app's own origin and comes
-    back in the next request's headers.
 
-    json.dumps quotes the value: a room label is ours, but it ends up inside a
-    script tag, and building JavaScript by concatenation is how that stops
-    being true.
+def _browser_script(body: str) -> None:
+    """Run a little JavaScript in the page, invisibly.
 
-    SameSite is decided IN THE BROWSER, because it depends on where the page
-    ended up. Community Cloud serves the app inside an iframe on its own host
-    page, and a Lax cookie is not sent with a CROSS-site frame — so on https
-    the cookie is written SameSite=None; Secure, which survives being embedded.
-    Locally the app is the top-level page on plain http, where None is rejected
-    outright and Lax is correct. What is stored is a room number, and identity
-    here is a claim with nothing locked to it, so a cookie that travels with an
-    embed gives nothing away.
-
-    If a browser refuses it anyway — Safari blocks third-party cookies flatly —
-    nothing breaks: the read simply finds nothing and the picker appears, which
-    is exactly what happened before any of this.
+    Streamlit strips <script> out of st.markdown, so the only way to reach the
+    browser is a component iframe. Streamlit sandboxes those with
+    allow-same-origin — measured on the running app — so it shares the app's
+    origin and can touch the app document's storage and address. height=0, and
+    measured at zero: it costs nothing on the page.
     """
-    base = f"{ROOM_COOKIE}={value}; path=/; max-age={max_age}"
-    components.html(
-        "<script>"
-        f"var base = {json.dumps(base)};"
+    components.html(f"<script>{body}</script>", height=0)
+
+
+def _write_room_cookie(value: str, max_age: int) -> None:
+    """Remember the room in the browser, two ways, because one is not enough.
+
+    The COOKIE is the quiet one: st.context.cookies lets the server read it
+    straight out of the next request, so the app simply knows who you are and
+    nothing else happens. But the server can only READ cookies — Streamlit has
+    no way to set one — so the write has to happen out here, and out here is
+    where it can be refused. Community Cloud serves the app inside an iframe on
+    its own host page; a Lax cookie is not sent with a cross-site frame, so on
+    https it is written SameSite=None; Secure, and a browser blocking
+    third-party cookies drops it regardless of what we ask for.
+
+    LOCAL STORAGE is the loud one, and it is the fallback: nothing on the
+    server can see it, so the page has to put the room back into its own
+    address before Python gets a look (see _restore_room_from_storage). That
+    costs one reload, which is why it is the second choice and not the first.
+
+    What is stored is a room number. Identity here is a claim with nothing
+    locked to it, so neither of these gives anything away.
+    """
+    cookie = f"{ROOM_COOKIE}={value}; path=/; max-age={max_age}"
+    _browser_script(
+        f"var base = {json.dumps(cookie)};"
         'var https = location.protocol === "https:";'
-        'document.cookie = base + (https ? "; SameSite=None; Secure" : "; SameSite=Lax");'
-        "</script>",
-        height=0,
+        'try { document.cookie = base + (https ? "; SameSite=None; Secure" : "; SameSite=Lax"); }'
+        "catch (e) {}"
+        f"try {{ var s = window.parent.localStorage; var v = {json.dumps(value)};"
+        f"  if (v) {{ s.setItem({json.dumps(ROOM_STORAGE_KEY)}, v); }}"
+        f"  else {{ s.removeItem({json.dumps(ROOM_STORAGE_KEY)}); }}"
+        f"  window.parent.sessionStorage.removeItem({json.dumps(REDIRECT_TRIED_KEY)}); }}"
+        "catch (e) {}"
     )
+
+
+_COMPONENT_DIR = pathlib.Path(__file__).parent / "identity_component"
+_ask_the_browser = components.declare_component("kitchenpal_identity", path=str(_COMPONENT_DIR))
+
+
+def room_from_storage(labels: list[str]) -> str:
+    """Ask the BROWSER what it remembers, when the request did not say.
+
+    A declared component is the only thing that can answer back: Streamlit
+    sandboxes component iframes without allow-top-navigation, so nothing in
+    there can put the room in the address and reload, and nothing in there can
+    reach the server on its own. Its value arrives on the run after it renders,
+    which costs one rerun and no reload — nobody sees it.
+
+    Drawn only on the screen that is about to ask, so a visit that already
+    knows who you are pays nothing for it.
+    """
+    try:
+        remembered = str(_ask_the_browser(key="kitchenpal_identity_probe") or "").strip()
+    except Exception:  # noqa: BLE001 - a component that will not load is just "we do not know"
+        return ""
+    return remembered if remembered in labels else ""
 
 
 def remember_room(room: str) -> None:
     """Keep the claim in the browser, so opening the app does not ask again.
 
-    Once per session per room: the cookie is already in the browser after the
-    first write, and re-rendering the iframe on every run would cost an element
-    on every page for nothing. Writing it again when this session ADOPTED a
-    cookie is deliberate, though — it pushes the expiry a year out from the
-    last visit rather than from whenever the room was first picked.
+    Once per session per room: it is already in the browser after the first
+    write, and re-rendering the iframe on every run would cost an element on
+    every page for nothing. Writing it again when this session ADOPTED a stored
+    room is deliberate, though — it pushes the expiry a year out from the last
+    visit rather than from whenever the room was first picked.
     """
     if not room or st.session_state.get(COOKIE_WRITTEN_KEY) == room:
         return
@@ -149,6 +186,12 @@ def default_index(labels: list[str], room: str, fallback: int = 0) -> int:
 
 
 def render_room_picker(room_entries) -> None:
+    """Ask — but only after the browser has had its chance to answer."""
+    remembered = room_from_storage(_known_labels(room_entries))
+    if remembered:
+        set_room(remembered)
+        st.rerun()
+
     st.subheader("Which room are you?")
     st.caption("Pick once. This browser remembers you, so the app opens as you next time.")
     for entry in room_entries:

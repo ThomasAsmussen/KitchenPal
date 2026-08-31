@@ -25,5 +25,10 @@ test = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The identity component is a static HTML file that Streamlit serves; a wheel
+# that dropped it would deploy an app that cannot remember who you are.
+[tool.setuptools.package-data]
+"kitchenpal.ui" = ["identity_component/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -213,3 +213,77 @@ class TestTheBrowserRemembersYou:
         # Already in the browser: rendering the iframe again on every run would
         # cost an element on every page for nothing.
         assert at.session_state["written"] == []
+
+
+def _storage_app():
+    """The picker, with a stand-in for the component that asks the browser.
+
+    AppTest has no browser, so a declared component returns its default and
+    nothing can be learned from it. The stand-in answers what a real browser
+    would have, and is put back afterwards — this runs in the pytest process.
+    """
+    import streamlit as st
+
+    from kitchenpal.sheets_service import RoomEntry
+    from kitchenpal.ui import identity
+
+    rooms = [
+        RoomEntry(label="346", name="Julia", account_row=56, signup_column=9),
+        RoomEntry(label="350", name="Josefine", account_row=60, signup_column=13),
+    ]
+    answer = st.session_state.get("stored", "")
+
+    def fake_component(**kwargs):
+        if answer == "explode":
+            raise RuntimeError("the component never loaded")
+        return answer
+
+    real = identity._ask_the_browser
+    identity._ask_the_browser = fake_component
+    try:
+        room = identity.current_room(rooms)
+        if not room:
+            identity.render_room_picker(rooms)
+        st.session_state["claimed"] = room
+    finally:
+        identity._ask_the_browser = real
+
+
+def _run_storage_app(stored):
+    at = AppTest.from_function(_storage_app)
+    at.session_state["stored"] = stored
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+class TestAskingTheBrowserDirectly:
+    """The cookie is the quiet path, but a browser can refuse it — Chrome
+    blocks third-party cookies, and Community Cloud serves the app inside an
+    iframe on its own host page. Local storage survives that (it is
+    partitioned, not blocked), but nothing on the server can read it, so a
+    component has to hand the value back."""
+
+    def test_a_remembered_room_is_adopted_instead_of_asking(self):
+        at = _run_storage_app("350")
+
+        assert at.session_state["claimed"] == "350"
+        assert not [block for block in at.subheader if "Which room" in block.value]
+
+    def test_a_room_that_has_left_the_house_is_ignored(self):
+        at = _run_storage_app("999")
+
+        assert at.session_state["claimed"] == ""
+        assert any("Which room" in block.value for block in at.subheader)
+
+    def test_a_browser_that_remembers_nothing_is_asked(self):
+        at = _run_storage_app("")
+
+        assert any("Which room" in block.value for block in at.subheader)
+
+    def test_a_component_that_never_loads_is_not_an_error(self):
+        """Blocked, partitioned, disabled — every one of them means "we do not
+        know", and the app asks, which is what it did before any of this."""
+        at = _run_storage_app("explode")
+
+        assert any("Which room" in block.value for block in at.subheader)

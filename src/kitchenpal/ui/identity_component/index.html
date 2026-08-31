@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>kitchenpal identity</title>
+<script>
+  // A Streamlit component's whole job here is to answer one question: which
+  // room did this browser claim last time? It reports it through Streamlit's
+  // own postMessage channel, which is the only route out of the component
+  // sandbox — that sandbox has no allow-top-navigation, so a component cannot
+  // reload the page to put the answer in the URL, and it has no way to reach
+  // the server directly.
+  var KEY = "kitchenpal_room";
+  var reported = false;
+
+  function send(type, data) {
+    var message = { isStreamlitMessage: true, type: type };
+    for (var key in data) { message[key] = data[key]; }
+    window.parent.postMessage(message, "*");
+  }
+
+  function stored() {
+    // Blocked, partitioned, disabled — every one of them is "we do not know",
+    // and the app asks, which is what it did before any of this existed.
+    try { return window.localStorage.getItem(KEY) || ""; } catch (e) { return ""; }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "streamlit:render" || reported) { return; }
+    reported = true;
+    send("streamlit:setComponentValue", { value: stored(), dataType: "json" });
+  });
+
+  send("streamlit:componentReady", { apiVersion: 1 });
+  send("streamlit:setFrameHeight", { height: 0 });
+</script>

@@ -294,11 +294,30 @@ on a personal screen:
   local http it is Lax (None is rejected without Secure). What is stored is a
   room number and identity is a claim with nothing locked to it, so a cookie
   that travels with an embed gives nothing away.
-  A cookie naming a room that has left the house is ignored, an unreadable
-  st.context is not an error, and a browser that refuses the cookie outright —
-  Safari blocks third-party cookies flatly — simply gets the picker, which is
-  what happened before any of this. Verify after a deploy by opening the app's
-  bare URL in a new tab: it should not ask. Choosing a room CLOSES the panel: a popover does not
+  THE COOKIE IS NOT ENOUGH ON ITS OWN, reported from production 2026-08-31:
+  it worked on a local first-party page and failed on Android Chrome and
+  desktop Chrome against the deployed app. Inside Cloud's frame the cookie is
+  third-party, and Chrome blocks those; nothing we can ask for changes that.
+  So there is a SECOND store and a way to read it back:
+  - The room is also written to localStorage, which browsers PARTITION in a
+    third-party frame rather than blocking — the top-level site is always the
+    same one, so it persists across visits.
+  - Nothing on the server can read localStorage, and a component CANNOT put
+    the room in the address and reload: Streamlit sandboxes component iframes
+    without allow-top-navigation, so `window.parent.location.replace` is
+    refused outright whenever the app is the top window ("Unsafe attempt to
+    initiate navigation..."). Do not try it — it silently does nothing.
+  - So ui/identity_component/index.html is a DECLARED component
+    (components.declare_component with a path), which reports the stored room
+    through Streamlit's own postMessage channel. Its value arrives on the run
+    after it renders: one rerun, no reload, and it is drawn ONLY from
+    render_room_picker, so a visit that already knows who you are never pays
+    for it. It is a static HTML file, so pyproject lists it as package-data.
+  A room that has left the house is ignored by both paths, an unreadable
+  st.context or a component that never loads is not an error, and a browser
+  that refuses everything simply gets the picker, which is what happened
+  before any of this. Verify after a deploy by opening the app's bare URL in a
+  new tab: it should not ask. Choosing a room CLOSES the panel: a popover does not
   close because something inside it was clicked, and st.rerun() does not close
   it either. Its open state is a widget value — but only when it is stateful,
   and `is_stateful = on_change != "ignore"` in Streamlit's layouts.py, so the
