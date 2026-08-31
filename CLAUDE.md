@@ -59,6 +59,17 @@ House 28 → 0 for the index; a Dinner re-render went 4 → 0.
   or removed.
 - Streamlit runs the body of a collapsed expander, so House shows an index and loads
   one section at a time. Do not put a read behind an expander and assume it is lazy.
+- The nav bar is drawn BEFORE page.run(), and the order is the point
+  (2026-08-31, pinned by a test in test_app_nav.py). A tab button reports its
+  click on the run that FOLLOWS it and st.switch_page raises immediately, so
+  everything drawn before the bar has already run by the time the app learns
+  you wanted to leave. Drawn last, a tab tap re-ran the page you were ON in
+  full, reads included, and only then switched. Measured with the month caches
+  expired: 2.2s for the page being left, then 15ms for the page arrived at.
+  Bar first, that run is 15-22ms. Warm, a switch is ~20ms of Python and ~270ms
+  click-to-painted locally — the rest is the websocket round trip and
+  Streamlit re-rendering the whole element tree, and on Community Cloud the
+  network adds to it.
 - Dinner answers from get_day_rows (one call for the month, menu description
   included). It does not call get_day_details or get_signed_up_people.
 

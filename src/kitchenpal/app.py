@@ -127,10 +127,15 @@ def run_app():
     # Streamlit's own navigation cannot do on a phone.
     page_by_slug = _build_pages(service)
     page = st.navigation(list(page_by_slug.values()), position="hidden")
+    # BEFORE the page, not after. A tab button is read on the run that follows
+    # the click, and st.switch_page raises immediately — so drawing the bar
+    # first means the page you are LEAVING never runs. Drawn last, that click
+    # paid for a full re-run of the page you were on, reads included, before
+    # the app even learned you wanted to go: measured at 2.2s against 15ms for
+    # the page actually arrived at. It also means the bar is on the screen when
+    # a page dies on a read, so nobody is trapped on it.
+    render_bottom_nav(_active_slug(page_by_slug, page), page_by_slug)
     try:
         page.run()
     except gspread.exceptions.APIError as exc:
-        # The bar is still drawn below, so a page that died on one read does not
-        # trap anyone on it.
         _render_sheets_error(exc)
-    render_bottom_nav(_active_slug(page_by_slug, page), page_by_slug)

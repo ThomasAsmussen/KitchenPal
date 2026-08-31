@@ -28,3 +28,31 @@ def test_active_slug_finds_the_running_page_including_the_default_one():
 
     for slug, page in page_by_slug.items():
         assert app._active_slug(page_by_slug, page) == slug
+
+
+def test_the_bar_is_drawn_before_the_page_runs(monkeypatch):
+    """Otherwise a tab click pays for a full re-run of the page you are LEAVING.
+
+    st.button reports the click on the run that FOLLOWS it, and st.switch_page
+    raises immediately — so whatever is drawn before the bar has already run by
+    the time the app learns you wanted to go somewhere else. Measured on the
+    real app with the month caches expired: 2.2s spent re-reading the page
+    being left, against 15ms once the bar came first.
+    """
+    order = []
+
+    class FakePage:
+        def run(self):
+            order.append("page")
+
+    page = FakePage()
+    monkeypatch.setattr(app.st, "set_page_config", lambda **kw: None)
+    monkeypatch.setattr(app, "AppConfig", lambda: object())
+    monkeypatch.setattr(app, "get_cached_service", lambda config: object())
+    monkeypatch.setattr(app, "_build_pages", lambda service: {"dinner": page})
+    monkeypatch.setattr(app.st, "navigation", lambda pages, **kw: page)
+    monkeypatch.setattr(app, "render_bottom_nav", lambda *a, **kw: order.append("nav"))
+
+    app.run_app()
+
+    assert order == ["nav", "page"]
