@@ -510,6 +510,24 @@ class DayToDaySheetsMixin:
         worksheet.batch_update(updates)
 
     def add_drinks(self, worksheet_name: str, room_number: int | str, beer_quantity: int, wine_quantity: int):
+        """Add to the month's tally for one person.
+
+        KNOWN RACE, not currently fixed. This reads the two cells and then
+        writes them back, in four separate requests, so two people logging
+        drinks within a second of each other can both read 4 and both write 5:
+        one round quietly goes missing. The sheet stays internally consistent —
+        no formula breaks, no balance is left half-updated — one entry is
+        simply not there.
+
+        A lock around the HTTP client does NOT close this and one was removed
+        for pretending to (see sheets_service.py): the gap is between two
+        requests, not inside one. Closing it properly means making the
+        increment atomic — a formula the sheet evaluates, or a re-read and
+        compare before writing — and neither is worth doing until it actually
+        bites. It needs two people in the same second, in a house of fifteen,
+        and the pencil on House's drinks ledger already SETS the tally rather
+        than adding to it, so the repair is one tap by whoever notices.
+        """
         worksheet = self.get_worksheet(worksheet_name)
         row = self._find_account_row_in_kovs(worksheet, str(room_number))
         if row is None:

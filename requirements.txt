@@ -7,6 +7,7 @@
 # app's Advanced settings on Community Cloud; there is no file for it.
 streamlit==1.57.0
 gspread==6.2.1
+requests==2.34.2
 oauth2client==4.1.3
 pandas==3.0.3
 ortools==9.15.6755

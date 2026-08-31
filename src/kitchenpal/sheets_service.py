@@ -1,6 +1,3 @@
-import functools
-import threading
-
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -30,21 +27,30 @@ from .sheets.planning import PlanningSheetsMixin
 from .sheets.transient import retry_reads
 
 
-def _serialise_requests(http_client, lock: "threading.RLock") -> None:
-    """Put a lock around the one method every Sheets call goes through.
+# (connect, read). Reads of this sheet run about 300 ms and the slowest thing
+# the app does is a month copy, so ten seconds to connect and twenty to answer
+# is far outside normal and still bounded.
+REQUEST_TIMEOUT_SECONDS = (10, 20)
 
-    An instance attribute shadows the class method, so every gspread object
-    built from this client is covered without patching the library globally
-    or wrapping an API surface that could grow underneath us.
-    """
-    inner = http_client.request
-
-    @functools.wraps(inner)
-    def request(*args, **kwargs):
-        with lock:
-            return inner(*args, **kwargs)
-
-    http_client.request = request
+# There was a lock around gspread's HTTPClient.request here, on the reasoning
+# that one shared connection is touched by every session's thread. It was
+# removed on 2026-08-31 because both halves of that reasoning were wrong.
+#
+# gspread does not hand out a bare requests.Session: it builds google-auth's
+# AuthorizedSession, whose request() is written for concurrent use (it copies
+# the headers per call and says so in a comment), over a connection pool that
+# is thread-safe and a cookie jar that holds its own lock. The one unguarded
+# race left is a token refresh — two threads can both fetch one, which costs a
+# redundant HTTP call about once an hour and leaves both tokens valid.
+#
+# And the thing the lock was justified with, an interleaved read-modify-write,
+# is not something it could ever have prevented: it serialised ONE request at
+# a time, while add_drinks reads and writes in four separate ones with the
+# lock released in between. See the note there.
+#
+# What it did do was make every resident wait behind the slowest request in
+# the process. Do not put it back without a race that is both real and
+# actually covered by a per-request lock.
 
 
 class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin, LogSheetsMixin):
@@ -60,8 +66,12 @@ class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin
         # thread. Serialise it: a read is ~300 ms and the house is fifteen
         # people, so the wait is rare and cheap, while an interleaved
         # read-modify-write is somebody's dinner charged twice.
-        self._http_lock = threading.RLock()
-        _serialise_requests(client.http_client, self._http_lock)
+        # gspread ships with NO timeout (HTTPClient.timeout is None), so a
+        # stalled socket waits for as long as the network allows — and one
+        # connection now serves the whole house, so that is everybody's page,
+        # not one person's. Bounded, the worst case is one slow request, and
+        # retry_reads gets another go at it.
+        client.http_client.set_timeout(REQUEST_TIMEOUT_SECONDS)
 
         if config.spreadsheet_id:
             # open_by_key costs NOTHING: gspread just wraps the id, no request

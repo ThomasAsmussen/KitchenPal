@@ -63,9 +63,18 @@ House 28 → 0 for the index; a Dinner re-render went 4 → 0.
   After: 16.7 ms and NO calls. The deploy guard moved rather than went away; a
   cached resource is keyed by the function and that key survives Cloud's
   re-import, so the stale-RoomEntry check still earns its place (see the
-  docstring). Because the object is now touched from every session's thread,
-  SheetsService.__init__ puts an RLock around gspread's HTTPClient.request —
-  the one method every Sheets call goes through.
+  docstring).
+  There WAS an RLock around gspread's HTTPClient.request, added with the
+  sharing and removed on 2026-08-31. Both halves of its justification were
+  wrong. gspread does not hand out a bare requests.Session — it builds
+  google-auth's AuthorizedSession, whose request() is written for concurrent
+  use, over a thread-safe pool and a self-locking cookie jar; the only
+  unguarded race is a token refresh, which costs a redundant call about once
+  an hour and leaves both tokens valid. And the interleaved read-modify-write
+  it was justified with is not something a PER-REQUEST lock can prevent (see
+  add_drinks). What it did do was make every resident wait behind the slowest
+  request in the process. Do not put it back without a race that is real AND
+  actually covered by a lock at that granularity.
 - Open the spreadsheet BY ID when one is configured (KITCHEN_SPREADSHEET_ID /
   secrets [app] spreadsheet_id). gspread's open_by_key makes no request at all;
   open(name) makes two — a Drive search for a file with that title, then the
@@ -354,6 +363,15 @@ on a personal screen:
   while a split bill is divided between a chosen few — and naming the split is what
   tells them apart. Rename user-facing strings TOGETHER; half a rename is worse than
   none. The sheet's own name for the block stays Andet, and so do the code names.
+- add_drinks has a KNOWN RACE, deliberately left: it reads the two cells and
+  writes them back in four separate requests, so two people logging drinks
+  within a second of each other can both read 4 and both write 5 and one round
+  goes missing. Nothing is left half-written and no formula breaks — an entry
+  is simply not there. A lock on the HTTP client does not close it (the gap is
+  BETWEEN requests) and one was removed for pretending to. Closing it properly
+  means an atomic increment; until it actually bites, the pencil on House's
+  drinks ledger SETS the tally rather than adding to it, so whoever notices
+  repairs it in one tap.
 - Drinks are counted in GLASSES of wine, not bottles. The app used to say "Bottles of
   wine" and the sheet charges 9,50 kr a unit against 6,00 for a beer (AJ25/AK25),
   which is a glass price — so anybody logging one bottle was under-reporting about
@@ -852,10 +870,22 @@ which puts `src/` on the path. Things about that environment that have bitten:
   `APIError: [503]` in one evening each showed a resident a traceback and a dead
   page. sheets/transient.py decides what is worth retrying (5xx and 429; never
   403/404, which will still be true in half a second), retry_reads wraps the
-  connect and worksheet lookups, and run_app turns an APIError into a sentence
-  plus a Try again button. NEVER wrap a WRITE in retry_reads: a 5xx on a write
-  is ambiguous, the write may have landed, and a retry charges someone's dinner
+  connect and worksheet lookups, and run_app turns one into a sentence plus a
+  Try again button. NEVER wrap a WRITE in retry_reads: a 5xx on a write is
+  ambiguous, the write may have landed, and a retry charges someone's dinner
   twice. Writes get the error and let the person press the button again.
+- gspread ships with NO TIMEOUT — HTTPClient.timeout is None — so a stalled
+  socket waits as long as the network allows. That was survivable while every
+  session built its own connection. It is not now that ONE connection serves
+  the whole house behind a lock: a single stalled call holds up everybody's
+  page, and the app looks frozen until it comes back. SheetsService sets
+  REQUEST_TIMEOUT_SECONDS = (10, 20) — far outside a normal ~300 ms read, and
+  bounded. A timeout is not an APIError, so transient.NETWORK_FAULTS makes it
+  retryable for READS and run_app catches it; without both, a timeout reached
+  the page as a traceback.
+  The freeze reported on 2026-08-31 (~19:21, alongside three "fragment does
+  not exist anymore" lines, which are the aftermath and not the cause) is what
+  put the timeout in and took the lock out.
 - Streamlit deprecations show up in the Cloud log long before they break the
   app. `use_container_width` became `width="stretch"` / `width="content"`, and
   `st.components.v1.html` became `st.iframe` (2026-08-31, removal announced

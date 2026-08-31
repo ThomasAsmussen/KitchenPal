@@ -64,9 +64,10 @@ def get_cached_service(config: AppConfig) -> SheetsService:
     then read every figure from st.cache_data, which was already shared. So the
     entire cold start of everybody after the first was connection setup that
     the house had already done. st.cache_resource is process-wide, which is
-    what it was always meant to be; SheetsService.__init__ serialises the
-    requests.Session underneath it, because a shared object is now touched from
-    every session's thread.
+    what it was always meant to be. Being shared, it is also touched from every
+    session's thread — gspread's AuthorizedSession is built for that, and
+    SheetsService gives it a timeout so one stalled call cannot hold up the
+    house.
 
     REBUILT, because Community Cloud does not restart the process when it
     deploys: Streamlit's watcher deletes every one of our modules from

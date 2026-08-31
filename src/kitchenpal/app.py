@@ -3,7 +3,7 @@ import streamlit as st
 
 from .config import AppConfig
 from .runtime_state import get_cached_service
-from .sheets.transient import is_transient
+from .sheets.transient import NETWORK_FAULTS, is_transient
 from .ui.errors import user_error_message
 from .ui.day_to_day import (
     identity_room_entries,
@@ -118,7 +118,7 @@ def run_app():
     config = AppConfig()
     try:
         service = get_cached_service(config)
-    except gspread.exceptions.APIError as exc:
+    except (gspread.exceptions.APIError, *NETWORK_FAULTS) as exc:
         _render_sheets_error(exc)
         return
 
@@ -137,5 +137,5 @@ def run_app():
     render_bottom_nav(_active_slug(page_by_slug, page), page_by_slug)
     try:
         page.run()
-    except gspread.exceptions.APIError as exc:
+    except (gspread.exceptions.APIError, *NETWORK_FAULTS) as exc:
         _render_sheets_error(exc)

@@ -177,6 +177,12 @@ class TestBuildingTheConnection:
         opened = {"by_key": [], "by_name": [], "requests": 0}
 
         class FakeHTTPClient:
+            def __init__(self):
+                self.timeout = None
+
+            def set_timeout(self, timeout):
+                self.timeout = timeout
+
             def request(self, *a, **kw):
                 opened["requests"] += 1
                 return None
@@ -240,31 +246,72 @@ class TestBuildingTheConnection:
         assert opened["by_name"] == ["Køkkenregnskab 3D ny"]
         assert opened["by_key"] == []
 
-    def test_a_request_waits_for_the_shared_lock(self, monkeypatch):
-        """The connection is shared by the whole house now, so the
-        requests.Session under gspread is touched from every session's thread.
-        Holding the lock elsewhere must hold the request too."""
-        import threading
+    def test_the_connection_is_given_a_timeout(self, monkeypatch):
+        """gspread ships with none at all, so a stalled socket waits as long as
+        the network allows — and one connection now serves the whole house
+        behind a lock, where that stalls everybody's page, not just one."""
+        from kitchenpal.sheets_service import REQUEST_TIMEOUT_SECONDS, SheetsService
 
-        from kitchenpal.sheets_service import SheetsService
+        _, client = self._fake_gspread(monkeypatch)
+        SheetsService(self._config("sheet-id-123"))
 
-        opened, client = self._fake_gspread(monkeypatch)
-        service = SheetsService(self._config("sheet-id-123"))
+        connect, read = REQUEST_TIMEOUT_SECONDS
+        assert client.http_client.timeout == (connect, read)
+        assert 0 < connect <= 30 and 0 < read <= 60
 
-        started, finished = threading.Event(), threading.Event()
 
-        def call():
-            started.set()
-            client.http_client.request("get", "anything")
-            finished.set()
+class TestAStalledNetworkIsNotACrash:
+    """A read that timed out says nothing about the sheet, so it is worth
+    another go — and it must never reach a resident as a traceback."""
 
-        worker = threading.Thread(target=call, daemon=True)
-        with service._http_lock:
-            worker.start()
-            assert started.wait(2)
-            assert not finished.wait(0.2)
-            assert opened["requests"] == 0
+    def test_a_timeout_is_worth_retrying(self):
+        import requests
 
-        worker.join(2)
-        assert finished.is_set()
-        assert opened["requests"] == 1
+        from kitchenpal.sheets.transient import is_transient
+
+        assert is_transient(requests.exceptions.ReadTimeout("took too long"))
+        assert is_transient(requests.exceptions.ConnectTimeout("no answer"))
+        assert is_transient(requests.exceptions.ConnectionError("refused"))
+
+    def test_a_read_that_times_out_once_is_tried_again(self):
+        import requests
+
+        from kitchenpal.sheets.transient import retry_reads
+
+        attempts = []
+
+        def flaky():
+            attempts.append(1)
+            if len(attempts) < 2:
+                raise requests.exceptions.ReadTimeout("took too long")
+            return "the rows"
+
+        assert retry_reads(flaky, delay=0) == "the rows"
+        assert len(attempts) == 2
+
+    def test_the_app_shows_a_sentence_rather_than_a_traceback(self):
+        """run_app caught gspread's APIError only, so a timeout — which is not
+        one — went to the page as a Python traceback."""
+        from streamlit.testing.v1 import AppTest
+
+        def script():
+            import requests
+
+            from kitchenpal import app
+
+            def boom(config):
+                raise requests.exceptions.ReadTimeout("took too long")
+
+            real = app.get_cached_service
+            app.get_cached_service = boom
+            try:
+                app.run_app()
+            finally:
+                app.get_cached_service = real
+
+        at = AppTest.from_function(script)
+        at.run()
+
+        assert not at.exception
+        assert any("not answering" in block.value for block in at.error)
+        assert at.button(key="kitchenpal_retry")

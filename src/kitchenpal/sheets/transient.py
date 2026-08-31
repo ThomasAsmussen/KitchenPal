@@ -18,6 +18,7 @@ import time
 from typing import Callable, TypeVar
 
 import gspread
+import requests
 
 
 T = TypeVar("T")
@@ -43,11 +44,24 @@ def status_code(exc: Exception) -> int | None:
     return code if isinstance(code, int) else None
 
 
+# A stalled socket is not an answer, it is the absence of one — and gspread
+# ships with NO timeout at all (HTTPClient.timeout is None), so before
+# SheetsService set one these could hang for as long as the network let them.
+NETWORK_FAULTS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+)
+
+
 def is_transient(exc: Exception) -> bool:
     """Worth trying again in a moment?"""
     if isinstance(exc, gspread.exceptions.APIError):
         return status_code(exc) in TRANSIENT_CODES
-    return False
+    # A read that timed out or never connected says nothing about the sheet, so
+    # reading again is safe. A WRITE that timed out says nothing either — but
+    # there the ambiguity cuts the other way and it may well have landed, which
+    # is why retry_reads is never put around one. See the module docstring.
+    return isinstance(exc, NETWORK_FAULTS)
 
 
 def retry_reads(call: Callable[[], T], *, attempts: int = 3, delay: float = 0.4) -> T:
