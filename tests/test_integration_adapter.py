@@ -73,6 +73,11 @@ class OpenpyxlWritableAdapter:
                 for j, val in enumerate(rowvals):
                     self.ws.cell(row=r1 + i, column=c1 + j).value = val
 
+    @property
+    def title(self):
+        # gspread's Worksheet has one, and SheetsService now keys its handles on it.
+        return self.ws.title
+
     def add_rows(self, n):
         self.ws.insert_rows(self.ws.max_row + 1, n)
 
@@ -103,6 +108,11 @@ class FakeSpreadsheetAdapter:
 
     def worksheet(self, name):
         return self._adapter
+
+    def worksheets(self):
+        # SheetsService loads every handle from one metadata fetch, so the
+        # fake has to answer the same question the real Spreadsheet does.
+        return [self._adapter]
 
 
 def _copy_test_sheet():

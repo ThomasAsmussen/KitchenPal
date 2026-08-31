@@ -18,5 +18,9 @@ def _clear_streamlit_caches():
     """ui/data.py hides the service from the cache key, so a stub's reads would
     otherwise be served to the next test that asks for the same month."""
     st.cache_data.clear()
+    # The connection is a cached RESOURCE now, and it is process-wide: one
+    # test's fake service would otherwise be handed to the next.
+    st.cache_resource.clear()
     yield
     st.cache_data.clear()
+    st.cache_resource.clear()

@@ -9,8 +9,6 @@ from .sheets_service import SheetsService
 
 
 SHEET_CACHE_VERSION_KEY = "kitchenpal_sheet_cache_version"
-SERVICE_STATE_KEY = "kitchenpal_sheets_service"
-SERVICE_CODE_KEY = "kitchenpal_service_code"
 
 
 def get_cache_version() -> int:
@@ -40,29 +38,54 @@ def _live_model_class():
     return importlib.import_module("kitchenpal.sheets.models").RoomEntry
 
 
-def get_cached_service(config: AppConfig) -> SheetsService:
-    """The connection, rebuilt when the code underneath it has been replaced.
+@st.cache_resource(show_spinner=False)
+def _connect(_config: AppConfig) -> SheetsService:
+    """One connection for the whole house, built once per process.
 
-    Community Cloud does not restart the process when it deploys: Streamlit's
-    watcher deletes every one of our modules from sys.modules and the next run
-    re-imports the lot. st.session_state survives that, so the SheetsService
-    living in it belongs to the OLD code and keeps handing out dataclasses
-    stamped with the OLD classes. st.cache_data then pickles one, checks that
-    the name still points at the same class object, finds it does not, and the
-    resident gets a traceback:
+    _config is underscored so Streamlit does not try to hash it: it carries the
+    service-account dict, which is not hashable, and there is only ever one
+    configuration anyway.
+
+    The service is stamped with the RoomEntry class it was built against, so
+    get_cached_service can tell when the code underneath it has been replaced.
+    """
+    service = SheetsService(_config)
+    service.model_class = _live_model_class()
+    return service
+
+
+def get_cached_service(config: AppConfig) -> SheetsService:
+    """The connection, shared across sessions and rebuilt after a deploy.
+
+    SHARED, because it used to live in st.session_state and that is per browser
+    session: every resident, and every new tab, paid to build their own. Traced
+    against a warm process, a second session made exactly two HTTP calls before
+    it could show anything — a Drive lookup and a metadata fetch, 1.2 s — and
+    then read every figure from st.cache_data, which was already shared. So the
+    entire cold start of everybody after the first was connection setup that
+    the house had already done. st.cache_resource is process-wide, which is
+    what it was always meant to be; SheetsService.__init__ serialises the
+    requests.Session underneath it, because a shared object is now touched from
+    every session's thread.
+
+    REBUILT, because Community Cloud does not restart the process when it
+    deploys: Streamlit's watcher deletes every one of our modules from
+    sys.modules and the next run re-imports the lot. A cached resource is keyed
+    by the function, and that key survives the re-import — so the service
+    handed back belongs to the OLD code and keeps minting dataclasses stamped
+    with the OLD classes. st.cache_data then pickles one, checks that the name
+    still points at the same class object, finds it does not, and the resident
+    gets a traceback:
 
         PicklingError: Can't pickle <class '...RoomEntry'>:
         it's not the same object as kitchenpal.sheets.models.RoomEntry
 
     So: keep the class the service was built against, and when it is no longer
-    the class in memory, throw the service away. Costs one API call, once, to
-    whoever happened to be mid-session during a deploy.
+    the class in memory, throw the connection away and build another. Costs one
+    rebuild, once, to whoever happens to be mid-session during a deploy.
     """
-    live = _live_model_class()
-    if st.session_state.get(SERVICE_CODE_KEY) is not live:
-        st.session_state.pop(SERVICE_STATE_KEY, None)
-
-    if SERVICE_STATE_KEY not in st.session_state:
-        st.session_state[SERVICE_STATE_KEY] = SheetsService(config)
-        st.session_state[SERVICE_CODE_KEY] = live
-    return st.session_state[SERVICE_STATE_KEY]
+    service = _connect(config)
+    if getattr(service, "model_class", None) is not _live_model_class():
+        _connect.clear()
+        service = _connect(config)
+    return service

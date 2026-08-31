@@ -45,6 +45,9 @@ class AppConfig:
             "koekkenregnskab-3d-ny-040a2ee5b105.json",
         )
     )
+    spreadsheet_id: str = field(
+        default_factory=lambda: _config_value("KITCHEN_SPREADSHEET_ID", "app", "spreadsheet_id", "")
+    )
     spreadsheet_name: str = field(
         default_factory=lambda: _config_value(
             "KITCHEN_SPREADSHEET_NAME",

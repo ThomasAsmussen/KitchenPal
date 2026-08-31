@@ -74,8 +74,14 @@ Supported environment variables:
 GOOGLE_CREDENTIALS_FILE=path/to/service-account.json
 GOOGLE_CREDENTIALS_JSON='{"type":"service_account", ...}'
 KITCHEN_SPREADSHEET_NAME="Køkkenregnskab 3D ny"
+KITCHEN_SPREADSHEET_ID="<the long id in the sheet's URL>"
 KITCHEN_TEMPLATE_SHEET="Skabelon"
 ```
+
+`KITCHEN_SPREADSHEET_ID` is optional and worth setting: with it the app opens
+the spreadsheet without a single request, while opening by name costs a Drive
+search plus a metadata fetch — about 1.3 seconds every time a process starts.
+Without it the app falls back to the name and works exactly as before.
 
 Make sure the Google Sheet is shared with the service account's `client_email`.
 
@@ -92,6 +98,7 @@ For local Streamlit secrets or Streamlit Community Cloud, use this shape:
 ```toml
 [app]
 spreadsheet_name = "Køkkenregnskab 3D ny"
+spreadsheet_id = "<the long id in the sheet's URL>"   # optional, and faster
 template_sheet_name = "Skabelon"
 
 [google_service_account]

@@ -1,5 +1,6 @@
 from datetime import date
 
+import gspread
 import pytest
 
 from kitchenpal import constants
@@ -305,25 +306,85 @@ def test_clear_andet_empties_the_row_including_the_marks():
     ]
 
 
-def test_get_worksheet_asks_the_spreadsheet_once_per_name():
-    # gspread re-fetches the sheet list on every worksheet() call, so holding the
-    # handle removes a round trip from every single service method.
-    ws = FakeWorksheet("August 2026")
-    spreadsheet = FakeSpreadsheet([ws])
-    calls = []
-    original = spreadsheet.worksheet
+def _counting_spreadsheet(worksheets):
+    """A FakeSpreadsheet that records every metadata fetch it is asked for."""
+    spreadsheet = FakeSpreadsheet(worksheets)
+    fetches = []
+    original = spreadsheet.worksheets
 
-    def counting(name):
-        calls.append(name)
-        return original(name)
+    def counting():
+        fetches.append(1)
+        return original()
 
-    spreadsheet.worksheet = counting
+    spreadsheet.worksheets = counting
+    return spreadsheet, fetches
+
+
+def test_every_worksheet_comes_from_one_metadata_fetch():
+    """gspread's Spreadsheet.worksheet(title) re-fetches the whole document's
+    metadata every time, so four sheets by name used to cost four identical
+    round trips. Traced on a cold Dinner load, six of them came to 2.4s — more
+    than the six calls that read actual data. One fetch returns them all."""
+    august = FakeWorksheet("August 2026")
+    log = FakeWorksheet("Log")
+    planning = FakeWorksheet("Planning")
+    spreadsheet, fetches = _counting_spreadsheet([august, log, planning])
     service = build_service(spreadsheet)
 
-    assert service.get_worksheet("August 2026") is ws
-    assert service.get_worksheet("August 2026") is ws
-    assert calls == ["August 2026"]
+    assert service.get_worksheet("August 2026") is august
+    assert service.get_worksheet("Log") is log
+    assert service.get_worksheet("Planning") is planning
+    assert service.get_worksheet("August 2026") is august
 
+    assert len(fetches) == 1
+
+
+def test_listing_the_sheets_refreshes_the_handles():
+    """list_sheets is how the app notices a sheet somebody added in the
+    browser, so it always fetches — and filling the handles while it is there
+    is what makes the get_worksheet calls on the page that follows free."""
+    august = FakeWorksheet("August 2026")
+    spreadsheet, fetches = _counting_spreadsheet([august])
+    service = build_service(spreadsheet)
+
+    assert service.list_sheets() == ["August 2026"]
+    assert service.get_worksheet("August 2026") is august
+
+    assert len(fetches) == 1
+
+
+def test_forgetting_the_handles_costs_one_fetch_and_no_more():
+    august = FakeWorksheet("August 2026")
+    spreadsheet, fetches = _counting_spreadsheet([august])
+    service = build_service(spreadsheet)
+
+    service.get_worksheet("August 2026")
     service.forget_worksheets()
-    assert service.get_worksheet("August 2026") is ws
-    assert calls == ["August 2026", "August 2026"]
+    service.get_worksheet("August 2026")
+    service.get_worksheet("August 2026")
+
+    assert len(fetches) == 2
+
+
+def test_a_name_that_is_not_there_still_raises_worksheet_not_found():
+    """Callers create the Planning and Possible-days sheets off the back of
+    this, so it has to keep being the exception gspread would have raised."""
+    spreadsheet, fetches = _counting_spreadsheet([FakeWorksheet("August 2026")])
+    service = build_service(spreadsheet)
+
+    with pytest.raises(gspread.exceptions.WorksheetNotFound):
+        service.get_worksheet("Planning")
+
+
+def test_a_sheet_added_since_the_handles_were_loaded_is_looked_for_again():
+    """Somebody can add a month sheet in the browser. An unknown name is worth
+    one more look before it is called missing."""
+    spreadsheet, fetches = _counting_spreadsheet([FakeWorksheet("August 2026")])
+    service = build_service(spreadsheet)
+    service.get_worksheet("August 2026")
+
+    september = FakeWorksheet("September 2026")
+    spreadsheet._worksheets["September 2026"] = september
+
+    assert service.get_worksheet("September 2026") is september
+    assert len(fetches) == 2

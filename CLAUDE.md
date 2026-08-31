@@ -54,9 +54,38 @@ House 28 → 0 for the index; a Dinner re-render went 4 → 0.
 - ui/data.py holds every read as an st.cache_data function, so one fetch serves the
   whole house instead of one per session. Writes call the matching clear_* helper;
   the Refresh button clears everything. Never add a read that bypasses this module.
-- SheetsService.get_worksheet caches the handle: gspread's Spreadsheet.worksheet()
-  re-fetches the sheet list on every call. forget_worksheets() when a sheet is added
-  or removed.
+- The CONNECTION is shared the same way (2026-08-31): runtime_state._connect is an
+  st.cache_resource, so it is built once per process. It lived in st.session_state,
+  which is per browser session, so every resident and every new tab built their
+  own. Traced against a warm process, a second session made two HTTP calls and
+  took 1245 ms before it could show anything — a Drive lookup and a metadata
+  fetch — then read every figure from st.cache_data, which was already shared.
+  After: 16.7 ms and NO calls. The deploy guard moved rather than went away; a
+  cached resource is keyed by the function and that key survives Cloud's
+  re-import, so the stale-RoomEntry check still earns its place (see the
+  docstring). Because the object is now touched from every session's thread,
+  SheetsService.__init__ puts an RLock around gspread's HTTPClient.request —
+  the one method every Sheets call goes through.
+- Open the spreadsheet BY ID when one is configured (KITCHEN_SPREADSHEET_ID /
+  secrets [app] spreadsheet_id). gspread's open_by_key makes no request at all;
+  open(name) makes two — a Drive search for a file with that title, then the
+  metadata — measured at 850 + 415 ms. Falls back to the name when no id is set,
+  so an unconfigured deployment still works.
+- SheetsService loads EVERY worksheet handle from one metadata fetch
+  (_load_worksheets). gspread's Spreadsheet.worksheet(title) re-fetches the whole
+  document's metadata every call, so four sheets by name cost four identical
+  round trips: traced on a cold Dinner load, six of them came to 2.4 s, more than
+  the six calls that read actual data. list_sheets always refetches — it is how
+  the app notices a sheet added in the browser, and ui/data.py already holds it
+  behind a TTL — and fills the handle cache while it is there. forget_worksheets()
+  when a sheet is added or removed; an unknown name is looked for once more before
+  it is called missing, so a hand-created sheet is still found.
+- Net effect on a cold process, traced: 13 HTTP calls / 5.2 s -> 8 calls / 3.4 s.
+  What is left is six genuine data reads plus two metadata fetches. Merging the
+  six into one batchGet (Sheets takes ranges across worksheets in one request)
+  would save another ~1.5 s, but it needs a "fetch what this page needs" layer
+  and breaks the property that each cached read clears on its own. Deliberately
+  not done.
 - Streamlit runs the body of a collapsed expander, so House shows an index and loads
   one section at a time. Do not put a read behind an expander and assume it is lazy.
 - The nav bar is drawn BEFORE page.run(), and the order is the point
