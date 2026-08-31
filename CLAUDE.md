@@ -857,8 +857,17 @@ which puts `src/` on the path. Things about that environment that have bitten:
   is ambiguous, the write may have landed, and a retry charges someone's dinner
   twice. Writes get the error and let the person press the button again.
 - Streamlit deprecations show up in the Cloud log long before they break the
-  app. `use_container_width` became `width="stretch"` / `width="content"`;
-  test_resilience.py fails if it comes back.
+  app. `use_container_width` became `width="stretch"` / `width="content"`, and
+  `st.components.v1.html` became `st.iframe` (2026-08-31, removal announced
+  for after 2026-06-01 — it was already overdue). test_resilience.py fails if
+  either comes back; the html check matches "components.html(" with the
+  bracket, so prose about why it went does not trip it. declare_component is
+  NOT deprecated, only html and iframe in that namespace.
+  st.iframe is not a drop-in: it REFUSES height=0, and height="content"
+  renders at its 150px default (measured), so the script iframes are 1px
+  inside a .st-key-kpalscript container the stylesheet clips. Not display:none
+  — an element out of the layout tree is no promise that its scripts run. The
+  residue is one pixel: the identity chip sits at y=127 instead of y=126.
 
 # Tests
 

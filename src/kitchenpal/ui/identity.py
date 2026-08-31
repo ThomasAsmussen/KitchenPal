@@ -77,12 +77,20 @@ def _browser_script(body: str) -> None:
     """Run a little JavaScript in the page, invisibly.
 
     Streamlit strips <script> out of st.markdown, so the only way to reach the
-    browser is a component iframe. Streamlit sandboxes those with
-    allow-same-origin — measured on the running app — so it shares the app's
-    origin and can touch the app document's storage and address. height=0, and
-    measured at zero: it costs nothing on the page.
+    browser is an iframe. Streamlit sandboxes those with allow-same-origin —
+    measured on the running app — so it shares the app's origin and can touch
+    st.iframe will not take height=0 the way components.html did, and
+    height="content" renders at its 150px default — measured — so it is one
+    pixel inside a container the stylesheet clips to nothing. The iframe stays
+    in the layout tree, which is what guarantees the script runs at all.
+
+    st.iframe, not the components.v1.html it replaced: that one is deprecated
+    and Cloud has already started saying so in the log. A string holding "<"
+    is never taken for a file path (_is_file in streamlit/elements/iframe.py),
+    so this lands in srcdoc exactly as before.
     """
-    components.html(f"<script>{body}</script>", height=0)
+    with st.container(key="kpalscript"):
+        st.iframe(f"<script>{body}</script>", height=1)
 
 
 def _write_room_cookie(value: str, max_age: int) -> None:

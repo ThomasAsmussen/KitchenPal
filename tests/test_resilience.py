@@ -139,17 +139,31 @@ class TestServiceSurvivesAReload:
         assert at.session_state["replaced"] is True
 
 
-def test_no_deprecated_container_width_argument_remains():
-    """Streamlit removes use_container_width after 2025-12-31; width= replaced it."""
+def _sources_containing(needle: str) -> list[str]:
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "src"
-    offenders = [
+    return [
         str(path.relative_to(src))
         for path in src.rglob("*.py")
-        if "use_container_width" in path.read_text()
+        if needle in path.read_text()
     ]
-    assert offenders == []
+
+
+def test_no_deprecated_container_width_argument_remains():
+    """Streamlit removes use_container_width after 2025-12-31; width= replaced it."""
+    assert _sources_containing("use_container_width") == []
+
+
+def test_no_deprecated_components_html_remains():
+    """st.components.v1.html goes after 2026-06-01 and st.iframe replaced it.
+    Cloud logs the warning long before the call stops working — that is the
+    whole warning we get, so it is worth failing a test over."""
+    # the open bracket, so that prose about why it is gone does not trip it
+    assert _sources_containing("components.html(") == []
+    # declare_component is NOT deprecated: only html and iframe are, and the
+    # identity component needs it.
+    assert _sources_containing("declare_component") == ["kitchenpal/ui/identity.py"]
 
 
 class TestBuildingTheConnection:

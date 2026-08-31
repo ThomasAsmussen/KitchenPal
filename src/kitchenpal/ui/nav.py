@@ -211,6 +211,17 @@ def page_styles(active_slug: str) -> str:
   /* Me lists a handful of your own rows — hairlines there would be noise */
   [class*="st-key-kpalrow_my_"] .kp-line {{ border-bottom: 0; padding: .35rem 0; }}
 
+  /* The identity scripts: an iframe that only runs JavaScript, clipped to
+     nothing. Not display:none — an element out of the layout tree is not a
+     promise that its scripts run. */
+  .st-key-kpalscript {{
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }}
+
   /* Dinner's day bar: one step either way, and the calendar between them.
      It sits above the title so that nothing which can change height is ever
      over it — the whole point is that it holds still while the page under it
