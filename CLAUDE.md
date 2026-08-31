@@ -885,7 +885,20 @@ which puts `src/` on the path. Things about that environment that have bitten:
   the page as a traceback.
   The freeze reported on 2026-08-31 (~19:21, alongside three "fragment does
   not exist anymore" lines, which are the aftermath and not the cause) is what
-  put the timeout in and took the lock out.
+  put the timeout in. Two browsers on ONE phone were frozen together, which is
+  the useful detail: the cause was process-wide, not per-session.
+- A HOUSE-WIDE FREEZE NEEDS NO LOCK OF OURS. st.cache_data takes a per-value
+  lock around a cache MISS — "only one of those sessions computes the value,
+  and the others block until" it is done (cache_utils.compute_value_lock).
+  Every resident wants the same month's figures, so that is the same lock, and
+  one stalled read holds all of them. This is Streamlit's, it predates
+  anything here, and removing our own lock did not remove it. The TIMEOUT is
+  what makes it survivable, which is why it is the fix and the lock removal is
+  only tidying.
+  It also means retry budgets are a house-wide concern: three attempts at a
+  20 s timeout is a minute inside that lock. transient.RETRY_DEADLINE_SECONDS
+  caps the whole loop at 25 s, so a fast 503 still gets three tries and a stall
+  gets one. Do not raise attempts without looking at the deadline.
 - Streamlit deprecations show up in the Cloud log long before they break the
   app. `use_container_width` became `width="stretch"` / `width="content"`, and
   `st.components.v1.html` became `st.iframe` (2026-08-31, removal announced

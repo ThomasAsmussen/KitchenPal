@@ -315,3 +315,54 @@ class TestAStalledNetworkIsNotACrash:
         assert not at.exception
         assert any("not answering" in block.value for block in at.error)
         assert at.button(key="kitchenpal_retry")
+
+
+class TestRetryingHasATimeBudget:
+    """Attempts alone are the wrong budget once a timeout counts as transient.
+    A read holds the lock st.cache_data puts around a cache miss, so a slow
+    retry loop is not one person waiting — it is everybody who wants the same
+    figure. Two browsers on one phone froze together on 2026-08-31."""
+
+    def test_a_fast_failure_still_gets_every_attempt(self):
+        """A 503 comes back in milliseconds; retrying costs nothing."""
+        import gspread
+
+        from kitchenpal.sheets.transient import retry_reads
+
+        attempts = []
+
+        def always_503():
+            attempts.append(1)
+            raise _api_error(503)
+
+        with pytest.raises(gspread.exceptions.APIError):
+            retry_reads(always_503, delay=0)
+
+        assert len(attempts) == 3
+
+    def test_a_slow_failure_is_not_tried_again(self):
+        import requests
+
+        from kitchenpal.sheets.transient import retry_reads
+
+        attempts = []
+
+        def slow_stall():
+            import time
+
+            attempts.append(1)
+            time.sleep(0.05)
+            raise requests.exceptions.ReadTimeout("took too long")
+
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            retry_reads(slow_stall, delay=0, deadline=0.01)
+
+        # the budget was spent by the first attempt
+        assert len(attempts) == 1
+
+    def test_the_default_budget_is_shorter_than_three_timeouts(self):
+        from kitchenpal.sheets.transient import RETRY_DEADLINE_SECONDS
+        from kitchenpal.sheets_service import REQUEST_TIMEOUT_SECONDS
+
+        _, read_timeout = REQUEST_TIMEOUT_SECONDS
+        assert RETRY_DEADLINE_SECONDS < read_timeout * 3

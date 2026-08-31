@@ -64,11 +64,27 @@ def is_transient(exc: Exception) -> bool:
     return isinstance(exc, NETWORK_FAULTS)
 
 
-def retry_reads(call: Callable[[], T], *, attempts: int = 3, delay: float = 0.4) -> T:
+# How long the whole thing may take, retries included. Attempts alone are the
+# wrong budget once a timeout counts as transient: three tries at a 20-second
+# timeout is a minute, and a read spends that minute holding the lock that
+# st.cache_data puts around a cache miss — so it is not one person waiting, it
+# is everybody who wants the same figure. A 503 comes back in milliseconds and
+# still gets all three tries; a stall gets one and then gives up.
+RETRY_DEADLINE_SECONDS = 25.0
+
+
+def retry_reads(
+    call: Callable[[], T],
+    *,
+    attempts: int = 3,
+    delay: float = 0.4,
+    deadline: float = RETRY_DEADLINE_SECONDS,
+) -> T:
     """Run a READ, giving Google a couple of chances to answer.
 
     Never wrap a write in this. See the module docstring.
     """
+    started = time.monotonic()
     last: Exception | None = None
     for attempt in range(attempts):
         try:
@@ -77,7 +93,8 @@ def retry_reads(call: Callable[[], T], *, attempts: int = 3, delay: float = 0.4)
             if not is_transient(exc):
                 raise
             last = exc
-            if attempt < attempts - 1:
-                time.sleep(delay * (2**attempt))
+            if attempt >= attempts - 1 or time.monotonic() - started >= deadline:
+                break
+            time.sleep(delay * (2**attempt))
     assert last is not None
     raise last
