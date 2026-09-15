@@ -6,6 +6,10 @@ from streamlit.testing.v1 import AppTest
 from kitchenpal.ui.admin import parked_fl_suggestions
 
 
+TARGET_MONTH, TARGET_YEAR = "September", 2026
+TARGET_SHEET = f"{TARGET_MONTH} {TARGET_YEAR}"
+
+
 def _account(label, name="", balance=0.0, row_number=56):
     return SimpleNamespace(label=label, name=name, balance=balance, row_number=row_number)
 
@@ -58,19 +62,28 @@ def _admin_app():
 
     import streamlit as st
 
-    from kitchenpal.ui import data
+    from kitchenpal.ui import admin as admin_module, data, rollover
     from kitchenpal.ui.admin import render_admin_view
 
     # A stub service is hidden from the cache key (the argument is underscored),
     # so each run starts from an empty cache instead of another test's reads.
     data.clear_everything()
+    # The behavior under test is independent of the wall clock. Freeze the
+    # rollover boundary so these tests remain valid after September 2026.
+    original_this_month = rollover.this_month
+    original_next_month = rollover.next_month
+    original_next_month_and_year = admin_module.next_month_and_year
+    rollover.this_month = lambda: ("August", 2026)
+    rollover.next_month = lambda: ("September", 2026)
+    admin_module.next_month_and_year = lambda: ("September", 2026)
+    target_sheet = "September 2026"
 
     def account(label, name="", balance=0.0):
         return SimpleNamespace(label=label, name=name, balance=balance, row_number=56)
 
     class StubService:
         def list_sheets(self):
-            return st.session_state.get("stub_sheets", ["August 2026", "September 2026"])
+            return st.session_state.get("stub_sheets", ["August 2026", target_sheet])
 
         def get_personal_account_entries(self, worksheet_name):
             override = st.session_state.get("stub_accounts", {}).get(worksheet_name)
@@ -112,7 +125,12 @@ def _admin_app():
                 duplicate_names=st.session_state.get("stub_duplicates", []),
             )
 
-    render_admin_view(StubService())
+    try:
+        render_admin_view(StubService())
+    finally:
+        rollover.this_month = original_this_month
+        rollover.next_month = original_next_month
+        admin_module.next_month_and_year = original_next_month_and_year
 
 
 def test_admin_asks_two_questions():
@@ -131,16 +149,16 @@ def test_thats_everyone_prepares_the_month_and_records_the_answer():
 
     assert not at.exception
     # Saying "this is right" is what fills the sheet: it is never a step of its own.
-    assert at.session_state["stub_copied"] == ("September", 2026)
+    assert at.session_state["stub_copied"] == (TARGET_MONTH, TARGET_YEAR)
     assert at.session_state["stub_logged"] == ["occupancy_confirmed"]
 
 
 def test_both_questions_answered_says_there_is_nothing_left():
     at = AppTest.from_function(_admin_app)
-    at.session_state["stub_accounts"] = {"September 2026": [("346", "Julia", 0.0)]}
+    at.session_state["stub_accounts"] = {TARGET_SHEET: [("346", "Julia", 0.0)]}
     at.session_state["stub_log"] = [
-        _log("prepared", month_sheet="September 2026"),
-        _log("occupancy_confirmed", month_sheet="September 2026"),
+        _log("prepared", month_sheet=TARGET_SHEET),
+        _log("occupancy_confirmed", month_sheet=TARGET_SHEET),
     ]
     at.session_state["stub_cooks"] = True
     at.run()
@@ -156,7 +174,7 @@ def test_only_people_with_a_room_count_as_needing_to_answer():
 
     class Stub:
         def list_sheets(self):
-            return ["August 2026", "September 2026"]
+            return ["August 2026", TARGET_SHEET]
 
         def get_room_entries(self, worksheet_name):
             return [
@@ -171,15 +189,15 @@ def test_only_people_with_a_room_count_as_needing_to_answer():
     from kitchenpal.ui import data
 
     data.clear_everything()
-    assert _answer_counts(Stub(), "September", 2026, "September 2026") == (0, 1)
+    assert _answer_counts(Stub(), TARGET_MONTH, TARGET_YEAR, TARGET_SHEET) == (0, 1)
 
 
 def test_the_question_is_a_roster_once_the_month_has_one():
     at = AppTest.from_function(_admin_app)
     at.session_state["stub_accounts"] = {
-        "September 2026": [("346", "Julia", -100.0), ("352", "", 0.0), ("FL1", "", 0.0)]
+        TARGET_SHEET: [("346", "Julia", -100.0), ("352", "", 0.0), ("FL1", "", 0.0)]
     }
-    at.session_state["stub_log"] = [_log("prepared", month_sheet="September 2026")]
+    at.session_state["stub_log"] = [_log("prepared", month_sheet=TARGET_SHEET)]
     at.run()
 
     at.button(key="admin_question_moving").click().run()
@@ -196,7 +214,7 @@ def test_opening_by_hand_carries_the_balances_and_logs_it():
     at.button(key="admin_open_month").click().run()
 
     assert not at.exception
-    assert at.session_state["stub_copied"] == ("September", 2026)
+    assert at.session_state["stub_copied"] == (TARGET_MONTH, TARGET_YEAR)
     assert at.session_state["stub_logged"] == ["rolled_over"]
 
 
@@ -219,12 +237,12 @@ def test_the_copy_report_is_surfaced():
 
 def test_money_left_behind_last_month_shows_as_a_to_do():
     at = AppTest.from_function(_admin_app)
-    # September has a roster of its own, and Julia is not on it.
-    at.session_state["stub_accounts"] = {"September 2026": [("346", "Mikkel", 0.0), ("352", "", 0.0)]}
-    at.session_state["stub_log"] = [_log("prepared", month_sheet="September 2026")]
+    # The target month has a roster of its own, and Julia is not on it.
+    at.session_state["stub_accounts"] = {TARGET_SHEET: [("346", "Mikkel", 0.0), ("352", "", 0.0)]}
+    at.session_state["stub_log"] = [_log("prepared", month_sheet=TARGET_SHEET)]
     at.run()
 
     assert not at.exception
     text = " ".join(block.value for block in at.markdown)
-    assert "Julia has no row in September" in text
+    assert f"Julia has no row in {TARGET_MONTH}" in text
     assert "-100.00 DKK" in text
