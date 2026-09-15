@@ -25,9 +25,8 @@ def _feedback_form_app():
 
 
 def test_feedback_form_clears_fields_after_submit():
-    # clear_on_submit is applied by the frontend, so AppTest cannot observe the
-    # cleared values directly; assert the form requests it and the submit still
-    # reaches the service with the entered values.
+    # The explicit state assertions protect the user-visible behavior even when
+    # the form immediately reruns after a successful submit.
     at = AppTest.from_function(_feedback_form_app).run()
 
     forms = list(_form_blocks(at._tree))
@@ -41,6 +40,9 @@ def test_feedback_form_clears_fields_after_submit():
 
     assert not at.exception
     assert at.session_state["stub_added"] == ("bug", "Julia", "Broken thing", "It broke when I clicked save.")
+    assert at.session_state["bug_name"] == ""
+    assert at.session_state["bug_title"] == ""
+    assert at.session_state["bug_details"] == ""
 
 
 def _purchases_app():
