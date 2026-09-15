@@ -1,6 +1,12 @@
+import importlib.util
 from types import SimpleNamespace
+from pathlib import Path
 
-from tools.dump_sheet import _open_spreadsheet
+
+_SPEC = importlib.util.spec_from_file_location("dump_sheet", Path(__file__).parents[1] / "tools" / "dump_sheet.py")
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+_open_spreadsheet = _MODULE._open_spreadsheet
 
 
 class FakeClient:
