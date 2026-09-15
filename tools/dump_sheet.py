@@ -33,7 +33,6 @@ READONLY_SCOPE = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# Real contact details stay out of the dump — see module docstring.
 ROSTER_SHEET = "Kopi af In-House Liste"
 MASKED_HEADERS = {
     "Mobil",
@@ -51,25 +50,38 @@ MASKED_HEADERS = {
 def _mask(value: str) -> str:
     return "".join("0" if ch.isdigit() else "x" if ch.isalpha() else ch for ch in value)
 
-config = AppConfig()
-if config.google_credentials_info:
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(config.google_credentials_info, READONLY_SCOPE)
-else:
-    creds = ServiceAccountCredentials.from_json_keyfile_name(config.credentials_file, READONLY_SCOPE)
-sh = gspread.authorize(creds).open(config.spreadsheet_name)
 
-out = pathlib.Path.home() / ".cache" / "kitchenpal"
-out.mkdir(parents=True, exist_ok=True)
-print(f"Dumping: {sh.title}")
-for ws in sh.worksheets():
-    rows = ws.get_all_values()
-    if ws.title == ROSTER_SHEET and rows:
-        masked = {i for i, header in enumerate(rows[0]) if header.strip() in MASKED_HEADERS}
-        rows = [rows[0]] + [
-            [_mask(cell) if i in masked else cell for i, cell in enumerate(row)]
-            for row in rows[1:]
-        ]
-    p = out / f"{ws.title.replace('/', '_')}.csv"
-    with p.open("w", newline="") as f:
-        csv.writer(f).writerows(rows)
-    print(f"  {p}  ({len(rows)} rows)")
+def _open_spreadsheet(client, config: AppConfig):
+    """Open the configured workbook, preferring its stable ID over its name."""
+    if config.spreadsheet_id:
+        return client.open_by_key(config.spreadsheet_id)
+    return client.open(config.spreadsheet_name)
+
+
+def main() -> None:
+    config = AppConfig()
+    if config.google_credentials_info:
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(config.google_credentials_info, READONLY_SCOPE)
+    else:
+        creds = ServiceAccountCredentials.from_json_keyfile_name(config.credentials_file, READONLY_SCOPE)
+    sh = _open_spreadsheet(gspread.authorize(creds), config)
+
+    out = pathlib.Path.home() / ".cache" / "kitchenpal"
+    out.mkdir(parents=True, exist_ok=True)
+    print(f"Dumping: {sh.title}")
+    for ws in sh.worksheets():
+        rows = ws.get_all_values()
+        if ws.title == ROSTER_SHEET and rows:
+            masked = {i for i, header in enumerate(rows[0]) if header.strip() in MASKED_HEADERS}
+            rows = [rows[0]] + [
+                [_mask(cell) if i in masked else cell for i, cell in enumerate(row)]
+                for row in rows[1:]
+            ]
+        p = out / f"{ws.title.replace('/', '_')}.csv"
+        with p.open("w", newline="") as f:
+            csv.writer(f).writerows(rows)
+        print(f"  {p}  ({len(rows)} rows)")
+
+
+if __name__ == "__main__":
+    main()
