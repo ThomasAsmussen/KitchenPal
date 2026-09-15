@@ -91,6 +91,8 @@ def render_feedback_form(service: SheetsService, feedback_type: str, config: dic
                 service.add_feedback_entry(feedback_type, name, title, details)
                 data.clear_feedback()
                 bump_cache_version()
+                for field in ("name", "title", "details"):
+                    st.session_state.pop(f"{feedback_type}_{field}", None)
                 st.success(config["success"])
                 st.rerun()
             except ValueError as exc:
