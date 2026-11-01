@@ -141,6 +141,22 @@ def test_admin_asks_two_questions():
     assert at.button(key="admin_question_cooking")
 
 
+def test_schedule_question_shows_the_month_selector_next_to_schedule_controls():
+    def script():
+        from kitchenpal.ui.admin import _render_schedule_month_picker
+
+        class Stub:
+            def list_sheets(self):
+                return ["November 2026", "December 2026", "Planning"]
+
+        _render_schedule_month_picker(Stub())
+
+    at = AppTest.from_function(script).run()
+
+    assert not at.exception
+    assert at.selectbox(key="admin_schedule_month").value == "December 2026"
+
+
 def test_thats_everyone_prepares_the_month_and_records_the_answer():
     at = AppTest.from_function(_admin_app).run()
 
