@@ -451,6 +451,21 @@ def test_plan_is_about_next_month_once_its_sheet_exists():
     assert month_setup._planning_month(service, AUGUST) == ("September", 2026)
 
 
+def test_plan_offers_current_and_next_month_when_both_sheets_exist():
+    service = _SheetStub(["August 2026", "September 2026", "Planning"])
+
+    assert month_setup.planning_month_options(service, AUGUST) == [
+        ("August", 2026),
+        ("September", 2026),
+    ]
+
+
+def test_plan_offers_only_current_month_when_next_sheet_is_not_ready():
+    service = _SheetStub(["August 2026", "Planning"])
+
+    assert month_setup.planning_month_options(service, AUGUST) == [("August", 2026)]
+
+
 def test_plan_falls_back_to_this_month_until_next_month_is_prepared():
     """Next month's sheet only appears when an admin prepares it, usually in the
     last week. Pinned to next month, the tab would spend most of the month

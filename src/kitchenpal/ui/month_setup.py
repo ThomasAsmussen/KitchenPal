@@ -104,12 +104,25 @@ def _planning_month(service: SheetsService, today: datetime | None = None) -> tu
     next month's is prepared.
     """
     now = today or datetime.now()
+    options = planning_month_options(service, now)
+    if options:
+        return options[-1]
+    return upcoming_month(now)
+
+
+def planning_month_options(
+    service: SheetsService, today: datetime | None = None
+) -> list[tuple[str, int]]:
+    """The current and next existing month sheets, in chronological order."""
+    now = today or datetime.now()
     sheets = _month_sheet_names(data.sheet_names(service))
+    current = (ENGLISH_MONTHS[now.month - 1], now.year)
     ahead = upcoming_month(now)
-    for month_name, year in (ahead, (ENGLISH_MONTHS[now.month - 1], now.year)):
-        if _month_sheet_for(MONTH_TO_NUMBER[month_name], year, sheets):
-            return month_name, year
-    return ahead
+    return [
+        (month_name, year)
+        for month_name, year in (current, ahead)
+        if _month_sheet_for(MONTH_TO_NUMBER[month_name], year, sheets)
+    ]
 
 
 def _planning_context(
