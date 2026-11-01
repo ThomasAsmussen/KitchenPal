@@ -43,6 +43,7 @@ from .month_setup import (
     _month_sheet_for,
     _month_sheet_names,
     _planning_context,
+    planning_month_options,
     _stored_availability,
     _unassigned_people_with_room_numbers,
 )
@@ -516,12 +517,29 @@ def _question_cooking(service: SheetsService, month_name: str, year: int, status
 
 
 def _cooking_body(service, month_name: str, year: int, status) -> None:
-    if not status.sheet_name:
-        st.caption(f"Answer question 1 first — it is what creates the {month_name} {year} sheet.")
+    selected = _render_schedule_month_picker(service)
+    if selected is None:
+        st.caption("There is no current or next month sheet available to schedule yet.")
         return
-    st.caption("People answer on their own Plan tab. Build the schedule once enough of them have.")
-    _dinner_days_setting(service, month_name, year)
-    _schedule_tools(service, month_name, year)
+    selected_month, selected_year = selected
+    st.caption(
+        f"Scheduling {selected_month} {selected_year}. People answer on their own Plan tab."
+    )
+    _dinner_days_setting(service, selected_month, selected_year)
+    _schedule_tools(service, selected_month, selected_year)
+
+
+def _render_schedule_month_picker(service: SheetsService) -> tuple[str, int] | None:
+    """Choose the month used by the schedule controls immediately below."""
+    options = planning_month_options(service)
+    if not options:
+        return None
+    labels = [f"{month_name} {year}" for month_name, year in options]
+    key = "admin_schedule_month"
+    if st.session_state.get(key) not in labels:
+        st.session_state[key] = labels[-1]
+    selected = st.selectbox("Month to schedule", labels, key=key)
+    return options[labels.index(selected)]
 
 
 def _open_question(key: str) -> None:
