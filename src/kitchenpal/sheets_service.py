@@ -15,6 +15,7 @@ from .sheets.models import (
     DaySummary,
     DrinkEntry,
     FeedbackEntry,
+    KitchenMeetingSubject,
     PersonalAccountEntry,
     PlanningEntry,
     PurchaseEntry,
@@ -22,6 +23,7 @@ from .sheets.models import (
     TransactionEntry,
 )
 from .sheets.log import LogEntry, LogSheetsMixin
+from .sheets.meetings import KitchenMeetingSheetsMixin
 from .sheets.months import MonthSheetsMixin
 from .sheets.planning import PlanningSheetsMixin
 from .sheets.transient import retry_reads
@@ -53,7 +55,7 @@ REQUEST_TIMEOUT_SECONDS = (10, 20)
 # actually covered by a per-request lock.
 
 
-class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin, LogSheetsMixin):
+class SheetsService(AccountSheetsMixin, PlanningSheetsMixin, DayToDaySheetsMixin, MonthSheetsMixin, FeedbackSheetsMixin, KitchenMeetingSheetsMixin, LogSheetsMixin):
     def __init__(self, config: AppConfig):
         if config.google_credentials_info:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(config.google_credentials_info, GOOGLE_SHEETS_SCOPE)
@@ -137,6 +139,7 @@ __all__ = [
     "DaySummary",
     "DrinkEntry",
     "FeedbackEntry",
+    "KitchenMeetingSubject",
     "LogEntry",
     "PersonalAccountEntry",
     "PlanningEntry",

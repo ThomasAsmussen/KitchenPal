@@ -16,6 +16,7 @@ SCHEDULING_WEEKDAYS = {
 class ScheduleResult:
     assignments: Dict[int, str]
     unassigned_people: List[str]
+    unassigned_days: List[int]
 
 
 def get_weekdays_in_month(year: int, month: int) -> List[int]:
@@ -104,7 +105,14 @@ def schedule_people(
     people = list(available_days.keys())
     ordered_days = sorted(set(possible_days))
     model = cp_model.CpModel()
-    schedule = {day: model.NewIntVar(0, len(people) - 1, f"schedule_{day}") for day in ordered_days}
+    # -1 means that the optimizer deliberately left this dinner day open.
+    schedule = {day: model.NewIntVar(-1, len(people) - 1, f"schedule_{day}") for day in ordered_days}
+    assigned_by_day = {}
+    for day in ordered_days:
+        assigned = model.NewBoolVar(f"assigned_{day}")
+        model.Add(schedule[day] >= 0).OnlyEnforceIf(assigned)
+        model.Add(schedule[day] == -1).OnlyEnforceIf(assigned.Not())
+        assigned_by_day[day] = assigned
 
     for person_index, person in enumerate(people):
         for day in ordered_days:
@@ -112,7 +120,6 @@ def schedule_people(
                 model.Add(schedule[day] != person_index)
 
     assigned_by_person = {}
-    limit_penalties = []
     spacing_penalties = []
     for person_index, person in enumerate(people):
         assigned_days = []
@@ -125,11 +132,10 @@ def schedule_people(
             assigned_day_vars[day] = assigned
 
         assigned_by_person[person] = assigned_days
+        # This is a hard limit. Leaving a day open is preferable to assigning
+        # somebody a third night (or breaking their stricter once-a-month limit).
         max_days = 1 if limit_one_day_per_person.get(person, False) else 2
-        extra_days = model.NewIntVar(0, len(ordered_days), f"extra_days_{person_index}")
-        model.Add(extra_days >= sum(assigned_days) - max_days)
-        model.Add(extra_days >= 0)
-        limit_penalties.append(extra_days)
+        model.Add(sum(assigned_days) <= max_days)
 
         for left_index, left_day in enumerate(ordered_days):
             for right_day in ordered_days[left_index + 1 :]:
@@ -149,6 +155,8 @@ def schedule_people(
         model.Add(sum(assigned_by_person[person]) == 0).OnlyEnforceIf(has_assignment.Not())
         unassigned_penalties.append(has_assignment.Not())
 
+    unassigned_day_penalties = [assigned.Not() for assigned in assigned_by_day.values()]
+
     preferred_assignments = []
     for person_index, person in enumerate(people):
         for day in preferences.get(person, []):
@@ -158,11 +166,11 @@ def schedule_people(
                 model.Add(schedule[day] != person_index).OnlyEnforceIf(preferred.Not())
                 preferred_assignments.append(preferred)
 
-    unassigned_penalty_weight = 1000
-    extra_day_penalty_weight = 80
+    unassigned_person_penalty_weight = 1000
+    unassigned_day_penalty_weight = 100
     model.Minimize(
-        unassigned_penalty_weight * sum(unassigned_penalties)
-        + extra_day_penalty_weight * sum(limit_penalties)
+        unassigned_person_penalty_weight * sum(unassigned_penalties)
+        + unassigned_day_penalty_weight * sum(unassigned_day_penalties)
         + sum(spacing_penalties)
         - sum(preferred_assignments)
     )
@@ -172,8 +180,17 @@ def schedule_people(
     if status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
         return None
 
-    assignments = {day: people[solver.Value(schedule[day])] for day in ordered_days}
+    assignments = {
+        day: people[solver.Value(schedule[day])]
+        for day in ordered_days
+        if solver.Value(schedule[day]) >= 0
+    }
+    unassigned_days = [day for day in ordered_days if solver.Value(schedule[day]) == -1]
     unassigned_people = [
         person for person, assigned_days in assigned_by_person.items() if not any(solver.Value(day) for day in assigned_days)
     ]
-    return ScheduleResult(assignments=assignments, unassigned_people=unassigned_people)
+    return ScheduleResult(
+        assignments=assignments,
+        unassigned_people=unassigned_people,
+        unassigned_days=unassigned_days,
+    )

@@ -26,13 +26,15 @@ The optimizer searches for a feasible schedule and minimizes a weighted
 objective:
 
 - assign as many people as possible at least once;
-- avoid assigning people more than their configured limit;
+- never assign a person more than their configured limit (normally two days);
+- leave some days unassigned rather than exceeding those limits when capacity is too low;
 - avoid repeated assignments that are less than about a week apart;
 - give a small bonus to preferred days.
 
 This means the generated schedule is not just the first valid assignment it can
 find. It is chosen to balance fairness, spacing, hard availability constraints,
-and individual preferences.
+and individual preferences. If some days cannot be covered, the result reports
+those unassigned days instead of overloading a person.
 
 ## Requirements
 

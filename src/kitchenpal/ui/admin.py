@@ -638,6 +638,13 @@ def _schedule_tools(service: SheetsService, month_name: str, year: int) -> None:
             unsafe_allow_html=True,
         )
 
+    if schedule.unassigned_days:
+        days = ", ".join(
+            f"{ENGLISH_WEEKDAY_NAMES[calendar.weekday(context.year, context.month, day)][:3]} {day}"
+            for day in schedule.unassigned_days
+        )
+        st.warning("No cook assigned: " + days)
+
     if schedule.unassigned_people:
         st.info("Not assigned: " + ", ".join(schedule.unassigned_people))
     unassigned_room_people = _unassigned_people_with_room_numbers(schedule.unassigned_people, person_to_room)
