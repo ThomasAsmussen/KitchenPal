@@ -37,7 +37,7 @@ from .month_setup import (
     PlanningContext,
     _answered_count,
     _planning_context,
-    upcoming_month,
+    planning_month_options,
     _planning_room_entry,
     _rota_entries,
     _weekday_label,
@@ -50,6 +50,7 @@ CAN, CANT, PREF = "can", "cant", "pref"
 _NEXT_STATE = {CAN: CANT, CANT: PREF, PREF: CAN}
 _MARK = {CAN: "", CANT: "✕", PREF: "★"}
 EDIT_KEY = "planning_editing"
+PLANNING_MONTH_KEY = "planning_selected_month"
 
 
 # --------------------------------------------------------------- the answer
@@ -279,16 +280,25 @@ def _stop_editing() -> None:
 
 def render_planning_view(service: SheetsService) -> None:
     """The Plan tab: your own dates, and nobody else's."""
-    context = _planning_context(service)
+    month_options = planning_month_options(service)
+    if not month_options:
+        st.info("No current or next month sheet is available to plan yet.")
+        return
+
+    labels = [f"{month_name} {year}" for month_name, year in month_options]
+    if st.session_state.get(PLANNING_MONTH_KEY) not in labels:
+        # The next month is the normal planning target, so it is the default
+        # while still allowing the current month to be recovered after it has
+        # opened.
+        st.session_state[PLANNING_MONTH_KEY] = labels[-1]
+    selected_label = st.selectbox("Month to plan", labels, key=PLANNING_MONTH_KEY)
+    selected_index = labels.index(selected_label)
+    selected_month, selected_year = month_options[selected_index]
+    context = _planning_context(service, month_name=selected_month, year=selected_year)
     if context is None:
         return
 
     st.subheader(f"{context.month_name} {context.year}")
-    ahead = upcoming_month()
-    if (context.month_name, context.year) != ahead:
-        # Say why you are looking at the month you are in rather than the one
-        # you came to answer for, or the heading reads as the app's mistake.
-        st.caption(f"{ahead[0]} is not ready to plan yet.")
 
     room_entry, claimed = _planning_room_entry(service, context)
     if room_entry is None:
