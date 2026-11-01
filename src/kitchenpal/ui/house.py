@@ -22,7 +22,7 @@ from .day_to_day import (
 )
 from . import data
 from .feedback import render_feedback_view
-from .identity import current_room
+from .identity import current_room, display_name
 from .month import current_month_sheet, render_month_picker
 from .admin import render_admin_view
 from .month_setup import render_availability_overview
@@ -37,6 +37,7 @@ SECTIONS = [
     ("when", "Who can cook when", ":material/event_available:", "Everyone's answers for next month"),
     ("ledgers", "Drinks, purchases and payments", ":material/receipt_long:", "The full lists, and fixing a row"),
     ("ideas", "Bugs and ideas", ":material/lightbulb:", "What people have reported"),
+    ("meetings", "Kitchen meeting", ":material/groups:", "Subjects for the next kitchen meeting"),
     ("admin", "Admin", ":material/settings:", "Months, people and the host schedule"),
 ]
 
@@ -169,6 +170,9 @@ def _render_section(service: SheetsService, slug: str, worksheet_name: str) -> N
     if slug == "ideas":
         render_feedback_view(service)
         return
+    if slug == "meetings":
+        _render_kitchen_meeting(service)
+        return
     if slug == "admin":
         render_admin_view(service)
         return
@@ -196,6 +200,59 @@ def _render_section(service: SheetsService, slug: str, worksheet_name: str) -> N
             render_purchase_ledger(service, context, room)
         with payments_tab:
             render_payment_ledger(service, context, room)
+
+
+def _render_kitchen_meeting(service: SheetsService) -> None:
+    from datetime import date, timedelta
+
+    def first_sunday(year: int, month: int) -> date:
+        first = date(year, month, 1)
+        return first + timedelta(days=(6 - first.weekday()) % 7)
+
+    today = date.today()
+    meeting_date = first_sunday(today.year, today.month)
+    if meeting_date < today:
+        next_month = 1 if today.month == 12 else today.month + 1
+        next_year = today.year + 1 if today.month == 12 else today.year
+        meeting_date = first_sunday(next_year, next_month)
+    st.caption(f"Next meeting: Sunday {meeting_date.strftime('%-d %B %Y')}")
+
+    worksheet_name = current_month_sheet(service)
+    context = build_month_context(service, worksheet_name, include_month_entries=False)
+    if context is None:
+        return
+    room_entries = context.room_entries
+    current = current_room(room_entries)
+    people = [entry.label for entry in room_entries if entry.label]
+    if not people:
+        st.caption("No residents are available to submit a subject.")
+        return
+
+    with st.form("kitchen_meeting_subject_form", clear_on_submit=True):
+        subject = st.text_input("Subject")
+        submitted_by = st.selectbox(
+            "Submitted by",
+            people,
+            index=people.index(current) if current in people else 0,
+            format_func=lambda label: f"{label} — {display_name(room_entries, label)}",
+        )
+        if st.form_submit_button("Add subject"):
+            try:
+                service.add_kitchen_meeting_subject(subject, submitted_by)
+                data.clear_kitchen_meeting_subjects()
+                st.success("Subject added.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+    subjects = data.kitchen_meeting_subjects(service)
+    st.markdown("**Subjects**")
+    if not subjects:
+        st.caption("No subjects yet.")
+        return
+    for item in subjects:
+        st.code(item.subject, language=None)
+        st.caption(f"Submitted by {display_name(room_entries, item.submitted_by)}")
 
 
 def render_house_view(service: SheetsService) -> None:

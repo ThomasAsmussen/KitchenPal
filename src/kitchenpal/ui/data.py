@@ -83,6 +83,11 @@ def feedback_entries(_service, feedback_type: str):
     return _service.get_feedback_entries(feedback_type)
 
 
+@st.cache_data(ttl=MONTH_TTL, show_spinner=False)
+def kitchen_meeting_subjects(_service):
+    return _service.get_kitchen_meeting_subjects()
+
+
 @st.cache_data(ttl=DIRECTORY_TTL, show_spinner=False)
 def log_entries(_service):
     """The whole event history — appended to rarely, read on Admin only."""
@@ -120,6 +125,10 @@ def clear_planning() -> None:
 
 def clear_feedback() -> None:
     feedback_entries.clear()
+
+
+def clear_kitchen_meeting_subjects(_service=None) -> None:
+    kitchen_meeting_subjects.clear()
 
 
 def clear_months() -> None:

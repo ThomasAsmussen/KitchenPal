@@ -123,6 +123,13 @@ class FeedbackEntry:
 
 
 @dataclass(frozen=True)
+class KitchenMeetingSubject:
+    row_number: int
+    subject: str
+    submitted_by: str
+
+
+@dataclass(frozen=True)
 class BankDetails:
     """Where to send money to the kitchen fund.
 
