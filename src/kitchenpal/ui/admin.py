@@ -497,8 +497,12 @@ def _ensure_prepared(service: SheetsService, month_name: str, year: int, room: s
 # --------------------------------------------------------------- question two
 
 def _question_cooking(service: SheetsService, month_name: str, year: int, status, *, done: bool, urgent: bool) -> None:
-    answered, total = _answer_counts(service, month_name, year, status.sheet_name)
-    if done:
+    selected_month, selected_year = _selected_schedule_target(service, month_name, year)
+    selected_context = _planning_context(service, month_name=selected_month, year=selected_year)
+    selected_sheet = selected_context.sheet_name if selected_context else status.sheet_name
+    answered, total = _answer_counts(service, selected_month, selected_year, selected_sheet)
+    selected_done = bool(selected_sheet) and rollover.cooks_are_written(service, selected_sheet)
+    if selected_done:
         summary = "The schedule is written"
     elif not total:
         summary = "Nobody to ask yet"
@@ -510,10 +514,22 @@ def _question_cooking(service: SheetsService, month_name: str, year: int, status
         "Who is cooking?",
         key="cooking",
         summary=summary,
-        done=done,
+        done=selected_done,
         urgent=urgent,
         body=lambda: _cooking_body(service, month_name, year, status),
     )
+
+
+def _selected_schedule_target(
+    service: SheetsService, fallback_month: str, fallback_year: int
+) -> tuple[str, int]:
+    """The month currently selected by the schedule controls, if any."""
+    options = planning_month_options(service)
+    labels = [f"{month_name} {year}" for month_name, year in options]
+    selected = st.session_state.get("admin_schedule_month")
+    if selected in labels:
+        return options[labels.index(selected)]
+    return fallback_month, fallback_year
 
 
 def _cooking_body(service, month_name: str, year: int, status) -> None:
